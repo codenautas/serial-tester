@@ -4,5 +4,8 @@
     "version": "0.0.2",
     "dependencies": {
         "backend-plus": "^2.5.2-betha.10"
+    },
+    "scripts": {
+        "test": "echo ok"
     }
 }
