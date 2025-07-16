@@ -1,7 +1,7 @@
 {
     "name": "serial-tester",
     "description": "Tester for backend-plus apps",
-    "version": "0.0.2",
+    "version": "0.0.3",
     "dependencies": {
         "backend-plus": "^2.5.2-betha.10"
     },
