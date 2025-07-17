@@ -2,10 +2,27 @@
     "name": "serial-tester",
     "description": "Tester for backend-plus apps",
     "version": "0.0.3",
+    "main": "dist/probador-serial.js",
+    "types": "dist/probador-serial.d.ts",
     "dependencies": {
-        "backend-plus": "^2.5.2-betha.10"
+        "backend-plus": "^2.5.2-betha.10",
+        "best-globals": "^2.0.1",
+        "cast-error": "^0.1.2",
+        "discrepances": "^0.2.9",
+        "guarantee-type": "^0.2.2",
+        "like-ar": "^0.5.1",
+        "mini-tools": "^1.13.4",
+        "json4all": "^1.4.0",
+        "type-fest": "^4.41.0"
+    },
+    "devDependencies": {
+        "@types/node": "^24.0.14",
+        "@types/mocha": "^10.0.10",
+        "mocha": "^11.7.1",
+        "typescript": "^5.8.3"
     },
     "scripts": {
+        "prepare": "tsc -p src",
         "test": "echo ok"
     }
 }
