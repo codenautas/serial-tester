@@ -9,6 +9,8 @@ import { sameValue } from 'best-globals'
 
 import { PartialOnUndefinedDeep } from 'type-fest';
 
+import * as Path from 'path';
+
 import * as discrepances from 'discrepances';
 
 export type Constructor<T> = new(...args: any[]) => T;
@@ -30,9 +32,9 @@ export async function startServer<T extends AppBackend>(AppConstructor: Construc
     );
     // var client = await pg.connect(config.db);
     // await client.executeSqlScript('test/fixtures/dump-4test.sql');
-    if (config.devel.delay) {
+    if (config.devel.delay && (isNaN(config.devel.delay) || config.devel.delay > 10)) {
         console.error('************************ WARNING ************************')
-        console.error('config.devel.delay', config.devel.delay, 'deberia ser 0 para tests')
+        console.error('config.devel.delay', config.devel.delay, 'deberia ser <= 10 para tests')
     }
     if (config.test?.["only-in-db"] == null) {
         console.error('************************ WARNING ************************')
@@ -61,38 +63,47 @@ export type Credentials = {username:string, password:string}
 export type FixedFields = {fieldName:string, value:any, until?:AnyValue}[]
 export type EasyFixedFields = null|undefined|FixedFields|Record<string,AnyValue|[AnyValue, AnyValue]>
 
-export type Methods = 'get'|'post'|'put'|'patch'|'delete'
+export type Methods = 'get'|'post'|'put'|'patch'|'delete'|'head'
 
 export interface ClientConfig{
     config: AppConfigClientSetup
 }
 
+export type ResultAs = 'JSON+' | 'text' | 'JSON' | 'bp-login-error';
+
 export class EmulatedSession<TApp extends AppBackend>{
-    private connstr:string
+    private baseUrl:string
     public tableDefs: Record<string, TableDefinition> = {}
     private cookies:string[] = []
     public config:ClientConfig | undefined
+    public parseResult: ResultAs = 'JSON+';
     constructor(private server:TApp, port:number){
-        this.connstr = `http://localhost:${port}${this.server.config.server["base-url"]}`;
+        this.baseUrl = `http://localhost:${port}${this.server.config.server["base-url"]}/`;
     }
     async request(params:{path:string, payload:any, onlyHeaders:boolean}):ReturnType<typeof fetch>;
-    async request<T = any>(params:{path:string, method:'get'}):Promise<T>;
+    async request<T = any>(params:{path:string, method:'get', parseResult:'text'}):Promise<string>;
+    async request<T = any>(params:{path:string, method:'get', parseResult:ResultAs}):Promise<T>;
     async request<T = any>(params:{path:string, payload:any}):Promise<T>;
-    async request({path, payload, onlyHeaders, method}:{path:string, payload?:any, onlyHeaders?:boolean, method?:Methods}){
-        method ??= 'post';
+    async request(params:{path:string, payload?:any, onlyHeaders?:boolean, method?:Methods, parseResult?:ResultAs}):Promise<any> {
+        const {path, payload} = params;
+        const method = params.method ?? 'post';
+        const onlyHeaders = params.onlyHeaders ?? (method == 'head' ? true : false);
+        const parseResult = params.parseResult ?? (method == 'get' ? 'text' : this.parseResult);
         var body = payload == null ? payload : new URLSearchParams(payload);
-        var headers = {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        } as Record<string, string>
-        if (this.cookies.length > 0) {
-            headers.Cookie = this.cookies[0]!.split(';')[0]!;
+        var headers = {} as Record<string, string>
+        if (payload != null) {
+            headers['Content-Type'] = 'application/x-www-form-urlencoded';
         }
-        var request = await fetch(this.connstr+path, {method, headers, body, redirect: 'manual'});
-        var direct = method == 'get';
+        if (this.cookies.length > 0) {
+            headers.Cookie = this.cookies.map(c => c.split(';')[0]).join('; ');
+        }
+        var target = Path.posix.join(this.baseUrl, path);
+        var response = await fetch(target, {method, headers, body, redirect: 'manual'});
+        this.cookies = response.headers.getSetCookie();
         if (onlyHeaders) {
-            return request;
+            return response;
         } else {
-            return this.getResult(request, direct);
+            return this.getResult(response, parseResult);
         }
     }
     async callProcedure<T extends Description, U extends Description>(
@@ -111,44 +122,57 @@ export class EmulatedSession<TApp extends AppBackend>{
         // return result;
         return guarantee(target.result, result);
     }
-    async getResult(request:Awaited<ReturnType<typeof fetch>>, direct?:boolean){
+    async getResult(request:Awaited<ReturnType<typeof fetch>>, parseResult?:ResultAs){
         var result = await request.text();
-        var lines = result.split(/\r?\n/);
-        var notices:string[] = []
-        if (direct) {
-            var directResult = JSON4all.parse(lines[0]!);
-            // console.log('----------------------- directResult',(directResult as any).config)
+        switch (parseResult) {
+        case 'text':
+            return result;
+        case 'JSON+':
+            var lines = result.split(/\r?\n/);
+            var notices:string[] = []
+            do {
+                var line = lines.shift();
+                if (line == '--') return JSON4all.parse( lines.shift() || 'null')
+                try{
+                    var obj = JSON4all.parse( line || '{}' ) as {error:{message:string, code:string}};
+                }catch(err){
+                    console.log('Json error:',line)
+                    throw err; 
+                }
+                if (obj.error) {
+                    const error = expected(new Error("Backend error: " + obj.error.message));
+                    error.code = obj.error.code;
+                    throw error;
+                }
+                if (line != null) notices.push(line);
+            } while (lines.length);
+            console.log("notices")
+            console.log(notices)
+            throw new Error('result not received');
+        case 'bp-login-error':
+            return result.match(/\berror-message[^>]*>([^<]*)</)?.[1];
+        default:
+            var directResult = JSON4all.parse(result);
             return directResult;
         }
-        do {
-            var line = lines.shift();
-            if (line == '--') return JSON4all.parse( lines.shift() || 'null')
-            try{
-                var obj = JSON4all.parse( line || '{}' ) as {error:{message:string, code:string}};
-            }catch(err){
-                console.log('Json error:',line)
-                throw err; 
-            }
-            if (obj.error) {
-                const error = expected(new Error("Backend error: " + obj.error.message));
-                error.code = obj.error.code;
-                throw error;
-            }
-            if (line != null) notices.push(line);
-        } while (lines.length);
-        console.log("notices")
-        console.log(notices)
-        throw new Error('result not received')
     }
-    async login(credentials: Credentials) {
+    async login(credentials: Credentials, opts:{returnErrorMessage?:boolean} = {}) {
         var payload = credentials;
         var request = await this.request({path:'/login', payload, onlyHeaders:true});
-        this.cookies = request.headers.getSetCookie();
         if (request.status != 302) throw new Error("se esperaba una redirección");
         var result = request.headers.get('location');
-        discrepances.showAndThrow(result?.substring(0,6), './menu');
-        this.config = await this.request<ClientConfig>({path:'/client-setup', method:'get'});
-        return result;
+        if (result != this.server.config.login.plus.successRedirect){
+            if (opts.returnErrorMessage) {
+                var errorMessage = await this.request({path:result!, method:'get', parseResult:'bp-login-error'});
+                return errorMessage;
+            } else {
+                discrepances.showAndThrow(result?.replace(/^\./,''), this.server.config.login.plus.successRedirect);
+                return result;
+            }
+        } else {
+            this.config = await this.request<ClientConfig>({path:'/client-setup', method:'get', parseResult:'JSON'});
+            return null;
+        }
     }
     async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'):Promise<DefinedType<T>>
     async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>
