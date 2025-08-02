@@ -161,7 +161,7 @@ export class EmulatedSession<TApp extends AppBackend>{
         var request = await this.request({path:'/login', payload, onlyHeaders:true});
         if (request.status != 302) throw new Error("se esperaba una redirección");
         var result = request.headers.get('location');
-        if (result != this.server.config.login.plus.successRedirect){
+        if (result?.replace(/^\./, '') != this.server.config.login.plus.successRedirect){
             if (opts.returnErrorMessage) {
                 var errorMessage = await this.request({path:result!, method:'get', parseResult:'bp-login-error'});
                 return errorMessage;
