@@ -5,7 +5,7 @@
     "main": "dist/probador-serial.js",
     "types": "dist/probador-serial.d.ts",
     "dependencies": {
-        "backend-plus": "^2.5.2-betha.10",
+        "backend-plus": "^2.5.2-betha.15",
         "best-globals": "^2.0.1",
         "cast-error": "^0.1.2",
         "discrepances": "^0.2.9",
@@ -16,10 +16,10 @@
         "type-fest": "^4.41.0"
     },
     "devDependencies": {
-        "@types/node": "^24.0.14",
+        "@types/node": "^24.1.0",
         "@types/mocha": "^10.0.10",
         "mocha": "^11.7.1",
-        "typescript": "^5.8.3"
+        "typescript": "^5.9.2"
     },
     "scripts": {
         "prepare": "tsc -p src",
