@@ -2,17 +2,18 @@
     "name": "serial-tester",
     "description": "Tester for backend-plus apps",
     "version": "0.1.1",
-    "main": "dist/probador-serial.js",
-    "types": "dist/probador-serial.d.ts",
+    "main": "dist/serial-skipper.js",
+    "types": "dist/serial-skipper.d.ts",
     "dependencies": {
         "backend-plus": "^2.5.2-betha.15",
         "best-globals": "^2.0.1",
         "cast-error": "^0.1.2",
         "discrepances": "^0.2.9",
         "guarantee-type": "^0.2.2",
+        "json4all": "^1.4.0",
         "like-ar": "^0.5.1",
         "mini-tools": "^1.13.4",
-        "json4all": "^1.4.0",
+        "playwright": "^1.54.2",
         "type-fest": "^4.41.0"
     },
     "devDependencies": {

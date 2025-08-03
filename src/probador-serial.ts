@@ -55,6 +55,11 @@ export async function startServer<T extends AppBackend>(AppConstructor: Construc
     return server;
 }
 
+export async function startEngineBackendAPI<T extends AppBackend>(AppConstructor: Constructor<T>):Promise<{backend:T}>{
+    const backend = await startServer(AppConstructor);
+    return {backend};
+}
+
 export type AnyValue = string|number|Date|boolean|null
 export type Row = Record<string, any>
 
@@ -71,13 +76,23 @@ export interface ClientConfig{
 
 export type ResultAs = 'JSON+' | 'text' | 'JSON' | 'bp-login-error';
 
+export interface Engines<TApp extends AppBackend>{
+    backend: TApp;
+}
+
 export class EmulatedSession<TApp extends AppBackend>{
-    private baseUrl:string
+    protected baseUrl:string
     public tableDefs: Record<string, TableDefinition> = {}
     private cookies:string[] = []
     public config:ClientConfig | undefined
     public parseResult: ResultAs = 'JSON+';
-    constructor(private server:TApp, port:number){
+    protected server:TApp
+    constructor(engines: TApp|Engines<TApp>, port:number){
+        if (engines instanceof AppBackend) {
+            this.server = engines;
+        } else {
+            this.server = engines.backend;
+        }
         this.baseUrl = `http://localhost:${port}${this.server.config.server["base-url"]}/`;
     }
     async request(params:{path:string, payload:any, onlyHeaders:boolean}):ReturnType<typeof fetch>;
