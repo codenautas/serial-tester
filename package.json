@@ -1,7 +1,7 @@
 {
     "name": "serial-tester",
     "description": "Tester for backend-plus apps",
-    "version": "0.2.0-betha.0",
+    "version": "0.2.0",
     "main": "dist/serial-skipper.js",
     "types": "dist/serial-skipper.d.ts",
     "dependencies": {
