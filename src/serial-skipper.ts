@@ -1,5 +1,5 @@
 import { Browser, Page, BrowserContext, chromium, firefox, webkit } from 'playwright';
-import { EmulatedSession, Methods, ResultAs, Credentials, startBackendAPIContext, AppBackendConstructor, Contexts } from './probador-serial';
+import { EmulatedSession, Methods, ResultAs, Credentials, startBackendAPIContext, AppBackendConstructor, Contexts } from './serial-api';
 export * from './serial-api';
 import { AppBackend } from 'backend-plus';
 import * as discrepances from 'discrepances';
