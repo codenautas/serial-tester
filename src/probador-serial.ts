@@ -13,7 +13,7 @@ import * as Path from 'path';
 
 import * as discrepances from 'discrepances';
 
-export type Constructor<T> = new(...args: any[]) => T;
+export type AppBackendConstructor<T> = new() => T;
 
 declare module "backend-plus"{
     interface AppConfig{
@@ -23,7 +23,7 @@ declare module "backend-plus"{
     }
 }
 
-export async function startServer<T extends AppBackend>(AppConstructor: Constructor<T>):Promise<T>{
+export async function startServer<T extends AppBackend>(AppConstructor: AppBackendConstructor<T>):Promise<T>{
     var server = new AppConstructor();
     await server.start();
     var config = await MiniTools.readConfig(
@@ -55,9 +55,9 @@ export async function startServer<T extends AppBackend>(AppConstructor: Construc
     return server;
 }
 
-export async function startEngineBackendAPI<T extends AppBackend>(AppConstructor: Constructor<T>):Promise<{backend:T}>{
+export async function startBackendAPIContext<T extends AppBackend>(AppConstructor: AppBackendConstructor<T>):Promise<Contexts<T>>{
     const backend = await startServer(AppConstructor);
-    return {backend};
+    return {backend, createSession: () => new EmulatedSession(backend, backend.config.server.port)};
 }
 
 export type AnyValue = string|number|Date|boolean|null
@@ -76,8 +76,9 @@ export interface ClientConfig{
 
 export type ResultAs = 'JSON+' | 'text' | 'JSON' | 'bp-login-error';
 
-export interface Engines<TApp extends AppBackend>{
+export interface Contexts<TApp extends AppBackend>{
     backend: TApp;
+    createSession: () => EmulatedSession<TApp>;
 }
 
 export class EmulatedSession<TApp extends AppBackend>{
@@ -87,12 +88,8 @@ export class EmulatedSession<TApp extends AppBackend>{
     public config:ClientConfig | undefined
     public parseResult: ResultAs = 'JSON+';
     protected server:TApp
-    constructor(engines: TApp|Engines<TApp>, port:number){
-        if (engines instanceof AppBackend) {
-            this.server = engines;
-        } else {
-            this.server = engines.backend;
-        }
+    constructor(engines: TApp, port:number){
+        this.server = engines;
         this.baseUrl = `http://localhost:${port}${this.server.config.server["base-url"]}/`;
     }
     async request(params:{path:string, payload:any, onlyHeaders:boolean}):ReturnType<typeof fetch>;
@@ -263,7 +260,7 @@ export function expectError(action: ()=>void|Promise<void>, check: string): void
     var allOk = false;
     function itDidntFail() {
         allOk = true;
-        throw new Error("probador-serial: itDidntFail")
+        throw new Error("serial-tester: itDidntFail")
     }
     function checkExpected(err:Error|unknown) {
         if (allOk) throw new Error("expectError -> not ERROR!");

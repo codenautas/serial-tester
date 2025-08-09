@@ -1,6 +1,6 @@
 import { Browser, Page, BrowserContext, chromium, firefox, webkit } from 'playwright';
-import { EmulatedSession, Methods, ResultAs, Credentials, startEngineBackendAPI, Constructor } from './probador-serial';
-export * from './probador-serial';
+import { EmulatedSession, Methods, ResultAs, Credentials, startBackendAPIContext, AppBackendConstructor, Contexts } from './probador-serial';
+export * from './serial-api';
 import { AppBackend } from 'backend-plus';
 import * as discrepances from 'discrepances';
 
@@ -29,15 +29,22 @@ class BrowserManager {
 
     async start(): Promise<Browser> {
         if (this.browser) {
-            return this.browser; // Ya está iniciado
+            throw new Error('Browser already started. Use stop() to close it first.');
         }
 
         const browserTypes = { chromium, firefox, webkit };
-        const browserType = browserTypes[this.config.browserType!];
+        const browserApp = browserTypes[this.config.browserType!];
+        if (!browserApp) {
+            throw new Error(`Unsupported browser type: ${this.config.browserType}`);
+        }
         
-        this.browser = await browserType.launch({
+        console.log('******************************************************************');
+        console.log(`Starting browser:`, this.config);
+
+        this.browser = await browserApp.launch({
             headless: this.config.headless,
-            slowMo: this.config.slowMo
+            slowMo: this.config.slowMo,
+            args: ['--start-maximized', '--window-position=0,0']
         });
 
         console.log(`Browser ${this.config.browserType} started`);
@@ -78,16 +85,10 @@ export async function startBrowser(browserConfig?: BrowserConfig): Promise<Brows
     return await manager.start();
 }
 
-export async function startEngines<T extends AppBackend>(AppConstructor: Constructor<T>, browserConfig?: BrowserConfig):Promise<{backend:T, browser: Browser}>{
-    const backend = await startEngineBackendAPI(AppConstructor);
+export async function startNavigatorContext<T extends AppBackend>(AppConstructor: AppBackendConstructor<T>, browserConfig?: BrowserConfig):Promise<Contexts<T>>{
+    const backend = await startBackendAPIContext(AppConstructor);
     const browser = await startBrowser(browserConfig);
-    return {...backend, browser};
-}
-
-export function engineNavigatorStarter<T extends AppBackend>(browserConfig: BrowserConfig){
-    return async (AppConstructor: Constructor<T>): Promise<{backend: T, browser: Browser}> => {
-        return startEngines(AppConstructor, browserConfig);
-    }
+    return {...backend, createSession: () => new BrowserEmulatedSession(backend.backend, browser, backend.backend.config.server.port)};
 }
 
 // BrowserContext representa una sesión de usuario independiente
@@ -95,11 +96,9 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
     private context: BrowserContext | null = null;
     private page: Page | null = null;
     private sessionConfig: SessionConfig;
-    protected browser: Browser;
 
-    constructor(protected engines:{backend: TApp, browser: Browser}, port: number, sessionConfig: SessionConfig = {}) {
-        super(engines.backend, port);
-        this.browser = engines.browser;
+    constructor(protected backend: TApp, private browser: Browser, port: number, sessionConfig: SessionConfig = {}) {
+        super(backend, port);
         this.sessionConfig = {
             viewport: { width: 1280, height: 720 },
             recordVideo: false,
@@ -150,7 +149,9 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         await this.initSession();
         if (!this.page) throw new Error('Browser session not initialized');
 
-        const loginUrl = new URL('/login', this.baseUrl).toString();
+        
+        const loginUrl = new URL('./login', this.baseUrl).toString();
+        console.log('going to login page:', this.baseUrl, loginUrl);
         await this.page.goto(loginUrl);
 
         // Llenar formulario de login
