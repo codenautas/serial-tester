@@ -92,11 +92,11 @@ export class EmulatedSession<TApp extends AppBackend>{
         this.server = engines;
         this.baseUrl = `http://localhost:${port}${this.server.config.server["base-url"]}/`;
     }
-    async request(params:{path:string, payload:any, onlyHeaders:boolean}):ReturnType<typeof fetch>;
-    async request<T = any>(params:{path:string, method:'get', parseResult:'text'}):Promise<string>;
-    async request<T = any>(params:{path:string, method:'get', parseResult:ResultAs}):Promise<T>;
-    async request<T = any>(params:{path:string, payload:any}):Promise<T>;
-    async request(params:{path:string, payload?:any, onlyHeaders?:boolean, method?:Methods, parseResult?:ResultAs}):Promise<any> {
+    private async request(params:{path:string, payload:any, onlyHeaders:boolean}):ReturnType<typeof fetch>;
+    private async request<T = any>(params:{path:string, method:'get', parseResult:'text'}):Promise<string>;
+    private async request<T = any>(params:{path:string, method:'get', parseResult:ResultAs}):Promise<T>;
+    private async request<T = any>(params:{path:string, payload:any}):Promise<T>;
+    private async request(params:{path:string, payload?:any, onlyHeaders?:boolean, method?:Methods, parseResult?:ResultAs}):Promise<any> {
         const {path, payload} = params;
         const method = params.method ?? 'post';
         const onlyHeaders = params.onlyHeaders ?? (method == 'head' ? true : false);
@@ -186,20 +186,26 @@ export class EmulatedSession<TApp extends AppBackend>{
             return null;
         }
     }
-    async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'):Promise<DefinedType<T>>
-    async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>
-    async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>{
-        var context = this.server.getContextForDump();
-        const {table, description} = target
+    async closeSession(): Promise<void> {
+        this.config = null!;
+    }
+    getJsonPkValues<T extends Description>(table: string, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, primaryKeyValues:undefined|null|any[]): string {
         if (this.server.tableStructures[table] == null) {
             throw new Error(`table "${table}" not found in server.tableStructures`);
         }
+        var context = this.server.getContextForDump();
         var tableDef = this.server.tableStructures[table](context);
+        return JSON4all.stringify(primaryKeyValues ?? tableDef.primaryKey.map(f => rowToSave[f]));
+    }
+    async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'):Promise<DefinedType<T>>
+    async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>
+    async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>{
+        const {table, description} = target
         var result = await this.request({
             path:'/table_record_save',
             payload:{
                 table,
-                primaryKeyValues: JSON4all.stringify(primaryKeyValues ?? tableDef.primaryKey.map(f => rowToSave[f])),
+                primaryKeyValues: this.getJsonPkValues(table, rowToSave, primaryKeyValues),
                 newRow: JSON4all.stringify(rowToSave),
                 oldRow: JSON4all.stringify({}),
                 status
