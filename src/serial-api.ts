@@ -134,7 +134,7 @@ export class EmulatedSession<TApp extends AppBackend>{
         // return result;
         return guarantee(target.result, result);
     }
-    async getResult(request:Awaited<ReturnType<typeof fetch>>, parseResult?:ResultAs){
+    private async getResult(request:Awaited<ReturnType<typeof fetch>>, parseResult?:ResultAs){
         var result = await request.text();
         switch (parseResult) {
         case 'text':
@@ -158,8 +158,10 @@ export class EmulatedSession<TApp extends AppBackend>{
                 }
                 if (line != null) notices.push(line);
             } while (lines.length);
-            console.log("notices")
-            console.log(notices)
+            if (notices.length) {
+                console.log("notices")
+                console.log(notices)
+            }
             throw new Error('result not received');
         case 'bp-login-error':
             return result.match(/\berror-message[^>]*>([^<]*)</)?.[1];

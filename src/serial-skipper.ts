@@ -1,5 +1,5 @@
 import { Browser, Page, BrowserContext, chromium, firefox, webkit, ElementHandle } from 'playwright';
-import { EmulatedSession, Credentials, startBackendAPIContext, AppBackendConstructor, Contexts } from './serial-api';
+import { EmulatedSession, Credentials, startBackendAPIContext, AppBackendConstructor, Contexts, ResultAs } from './serial-api';
 export * from './serial-api';
 import { AppBackend } from 'backend-plus';
 import * as discrepances from 'discrepances';
@@ -28,6 +28,13 @@ function escapeCss(value: string) {
     .replace(/\\/g, '\\\\')
     .replace(/'/g, "\\'")
     +`'`;
+}
+
+export async function withTimeout<T>(promise: Promise<T> | (()=>Promise<T>), ms: number, message?:string):Promise<T>{
+    return Promise.race([
+        promise instanceof Function ? promise() : promise,
+        new Promise<T>((_,reject) => { setTimeout(() => reject(new Error(message ?? 'timeout in withTimeout')), ms) })
+    ]);
 }
 
 // Singleton browser manager - equivalente a startServer pero para browsers
@@ -182,10 +189,15 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         }
     }
 
+    booleanRepresentation = {no: false, yes: true, si: true, sí: true, Sí:true, Si: true} as Record<string, boolean>;
     // valueFromVisualRepresentation(representation:string|null, type:{string: Opts}):string
     valueFromVisualRepresentation(representation:string|null, type:Description):any{
-        if (representation == null && ('nullable' in type || 'optional' in type)) return null;
+        if (representation == null) {
+            if ('nullable' in type || 'optional' in type) return null;
+            throw new Error(`valueFromVisualRepresentation error NUUL IS not a ${JSON.stringify(type)}`)
+        }
         if ('string' in type) return representation;
+        if ('boolean' in type) return this.booleanRepresentation[representation];
         throw new Error(`valueFromVisualRepresentation error ${representation} not a ${JSON.stringify(type)}`)
     }
 
@@ -205,6 +217,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             console.log('================> clicked', !!insButton)
             console.log(rowToSave, status, primaryKeyValues)
             var tableRow = await this.page.waitForSelector('table.my-grid tbody tr');
+            console.log('================> inserting column', !!tableRow)
         } else {
             var JsonPk = this.getJsonPkValues(target.table, rowToSave, primaryKeyValues);
             console.log('================> search', JsonPk)
@@ -234,16 +247,16 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         console.log('-------> saved');
         if (!('object' in target.description)) throw new Error('description must be {object:{...}}');
         var description: Record<string, Description> = target.description.object;
-            
-        var result = Object.fromEntries(
-            await Promise.all(
+        var touched = await Promise.all(
                 touchedElements.map(
                     async ({name, element}) => [name, this.valueFromVisualRepresentation(await element.textContent(), description[name]!)]
                 )
             )
+        console.log('================> acá', touched)
+        var result = Object.fromEntries(
+            touched
         );
-        await new Promise(_=>{})
-        console.log('================> ufs')
+        console.log('================> ufs', result)
         return guarantee(target.description, result);
     }
 
