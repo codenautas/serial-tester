@@ -224,7 +224,8 @@ export class EmulatedSession<TApp extends AppBackend>{
         const result = Object.keys(param).map(fieldName => {var value = param[fieldName]; return value instanceof Array ? {fieldName, value:value[0], until:value[1]} : {fieldName, value}})
         return result;
     }
-    async tableDataTest(table:string, rows:Row[], compare:'all',opts?:{fixedFields?:EasyFixedFields}){
+    async tableDataTest<T extends Description = any>(target: {table: string, description:T} | string, rows: Row[], compare: 'all', opts?: { fixedFields?: EasyFixedFields; }): Promise<void>{
+        var table = typeof target == "string" ? target : target.table;
         var result = await this.request({
             path:'/table_data',
             payload:{
@@ -235,16 +236,19 @@ export class EmulatedSession<TApp extends AppBackend>{
             }
         })
         var response = guarantee({array:is.object({})}, result);
-        if (rows.length > 0) {
-            var existColumn = LikeAr(rows[0]!).map(_ => true).plain();
-            var filteredReponseRows = response.map(row => LikeAr(row).filter((_,k) => !!existColumn[k]).plain());
+        this.compareRows(response, rows, compare);
+    }
+    protected compareRows(obtained: Record<string,any>[], expected:Record<string,any>[], compare:string){
+        if (expected.length > 0) {
+            var existColumn = LikeAr(expected[0]!).map(_ => true).plain();
+            var filteredReponseRows = obtained.map(row => LikeAr(row).filter((_,k) => !!existColumn[k]).plain());
         } else {
-            var filteredReponseRows = response;
+            var filteredReponseRows = obtained;
         }
         switch(compare){
             case 'all': 
                 try{
-                    discrepances.showAndThrow(filteredReponseRows, rows);
+                    discrepances.showAndThrow(filteredReponseRows, expected);
                 } catch (err) {
                     // console.log('======================================',rows.length == 0 ? response : filteredReponseRows, rows)
                     throw err;

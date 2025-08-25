@@ -1,10 +1,11 @@
 import { Browser, Page, BrowserContext, chromium, firefox, webkit, ElementHandle } from 'playwright';
-import { EmulatedSession, Credentials, startBackendAPIContext, AppBackendConstructor, Contexts, ResultAs } from './serial-api';
+import { EmulatedSession, Credentials, startBackendAPIContext, AppBackendConstructor, Contexts, EasyFixedFields, Row } from './serial-api';
 export * from './serial-api';
 import { AppBackend } from 'backend-plus';
 import * as discrepances from 'discrepances';
-import { DefinedType, Description, guarantee } from 'guarantee-type';
+import { DefinedType, Description } from 'guarantee-type';
 import { PartialOnUndefinedDeep } from 'type-fest';
+import * as json4all from 'json4all';
 
 export type BrowserType = 'chromium' | 'firefox' | 'webkit';
 
@@ -116,7 +117,14 @@ async function areConsecutives<T extends ElementHandle>(page: Page, el1:T, el2:T
 // BrowserContext representa una sesión de usuario independiente
 export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSession<TApp> {
     private context: BrowserContext | null = null;
-    private page: Page | null = null;
+    private _page: Page | null = null;
+    private get page(){
+        if (this._page == null) throw new Error("openGrid with no open page");
+        return this._page;
+    }
+    private set page(value){
+        this._page = value;
+    }
     private sessionConfig: SessionConfig;
 
     constructor(protected backend: TApp, private browser: Browser, port: number, sessionConfig: SessionConfig = {}) {
@@ -147,7 +155,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
     override async closeSession(): Promise<void> {
         if (this.page) {
             await this.page.close();
-            this.page = null;
+            this._page = null;
         }
         if (this.context) {
             await this.context.close();
@@ -201,34 +209,63 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         throw new Error(`valueFromVisualRepresentation error ${representation} not a ${JSON.stringify(type)}`)
     }
 
-    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'):Promise<DefinedType<T>>
-    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>
-    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>{
+    async openGrid(table: string, filter:Record<string, any>){
         console.log('================>', !!this.page)
-        if (this.page == null) throw new Error("saveRecord with no open page")
-        const url = new URL(`./menu#table=${target.table}`, this.baseUrl).toString();
+        if (this.page == null) throw new Error("openGrid with no open page")
+        const url = new URL(`./menu#table=${table}${filter ? `&ff=${json4all.toUrl(filter)}` : ``}`, this.baseUrl).toString();
         console.log('================> going to', url)
         await this.page.goto(url);
         console.log('================> there')
-        var insButton = await this.page.waitForSelector('button[bp-action=INS]');
+        var tableElement = await this.page.waitForSelector('table.my-grid');
+        return tableElement;
+    }
+
+    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'):Promise<DefinedType<T>>
+    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>
+    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>{
+        var tableElement = await this.openGrid(target.table, {})
+        var insButton = await tableElement.waitForSelector('button[bp-action=INS]');
         console.log('================> button', !!insButton, (status == 'new'), rowToSave)
         if (status == 'new') {
             insButton.click();
             console.log('================> clicked', !!insButton)
             console.log(rowToSave, status, primaryKeyValues)
-            var tableRow = await this.page.waitForSelector('table.my-grid tbody tr');
-            console.log('================> inserting column', !!tableRow)
+            var tableRow = await tableElement.waitForSelector('> tbody > tr:not([pk-values])', {state:'visible'});
+            console.log('================> inserting column pk =', await tableRow.getAttribute('pk-values'))
+            await Promise.all([tableRow].map(handler => this.explain(handler)));
         } else {
             var JsonPk = this.getJsonPkValues(target.table, rowToSave, primaryKeyValues);
             console.log('================> search', JsonPk)
-            console.log('================> searching', `table.my-grid tbody tr[pk-values=${escapeCss(JsonPk)}]`)
-            var tableRow = await this.page.waitForSelector(`table.my-grid tbody tr[pk-values=${escapeCss(JsonPk)}]`);
-            console.log('================> updating column', !!tableRow)
+            console.log('================> searching', `> tbody > tr[pk-values=${escapeCss(JsonPk)}]`)
+            var tableRow = await tableElement.waitForSelector(`> tbody > tr[pk-values=${escapeCss(JsonPk)}]`);
+            console.log('================> updating column pk =', await tableRow.getAttribute('pk-values'))
         }
         var touchedElements = [] as {name:string, element:(typeof tableRow)}[];
         for(var name in rowToSave){
             var prevInputElement = touchedElements[touchedElements.length - 1]?.element;
-            var element = await tableRow.waitForSelector(`[my-colname=${name}]`);
+            var elements = (await tableRow.$$(`>[my-colname=${name}]`));
+            console.log('================> selectores', elements.length);
+            await Promise.all(elements.map(handler => this.explain(handler)));
+            console.log('================> explained!')
+            try{
+                var element = (await tableRow.waitForSelector(`> [my-colname=${name}]`, {timeout: 1000}));
+            }catch(err){
+                if (status == 'new') {
+                    try {
+                        var element = (await tableElement.waitForSelector(`> tbody > tr:not([pk-values]) > [my-colname=${name}]`, {timeout: 1000}));
+                    }catch(err){
+                        console.log('===========> ERROR ins!', err)
+                        throw err;
+                    }
+                } else {
+                    console.log('===========> ERROR!', err)
+                    throw err;
+                }
+            }
+            console.log('================> have selector', !!tableRow)
+            console.log('================> ufiss pk =', await tableRow.getAttribute('pk-values'), ' content =',await element.textContent())
+            await element.waitForElementState('visible');
+            console.log('================> check pk =', await tableRow.getAttribute('pk-values'), ' content =',await element.textContent())
             console.log('-------> columna', name)
             if (prevInputElement != null && await areConsecutives(this.page, prevInputElement, element)) {
                 console.log('*tab*')
@@ -243,12 +280,16 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         }
         await this.page.keyboard.press("Tab")
         console.log('-------> saving');
-        await Promise.all(touchedElements.map(({name}) => tableRow.waitForSelector(`[my-colname=${name}][io-status=temporary-ok],[my-colname=${name}][io-status=ok],[my-colname=${name}]:not([io-status])`)))
+        await Promise.all(touchedElements.map(({name}) => tableRow.waitForSelector(`> [my-colname=${name}][io-status=temporal-ok],[my-colname=${name}][io-status=ok],[my-colname=${name}]:not([io-status])`)))
         console.log('-------> saved');
+        return this.getFieldData(target, touchedElements)
+    }
+
+    private async getFieldData<T extends Description>(target: {table: string, description:T}, pairsNameElement:{name:string, element:ElementHandle<HTMLLIElement>}[]){
         if (!('object' in target.description)) throw new Error('description must be {object:{...}}');
         var description: Record<string, Description> = target.description.object;
         var touched = await Promise.all(
-                touchedElements.map(
+                pairsNameElement.map(
                     async ({name, element}) => [name, this.valueFromVisualRepresentation(await element.textContent(), description[name]!)]
                 )
             )
@@ -257,7 +298,40 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             touched
         );
         console.log('================> ufs', result)
-        return guarantee(target.description, result);
+        return result;
+        // return guarantee(target.description, result);
+    }
+
+    private async getAllVisibleRowsFromGrid<T extends Description>(target: {table: string, description:T}, tableElement: ElementHandle<HTMLLIElement>, columnNames:string[]):Promise<DefinedType<T>[]>{
+        console.log('~~~~~~~~~~~~>', target.table);
+        var buttonToGetAllRows = await tableElement.waitForSelector('[all-rows-displayed]', {state: 'attached'});
+        console.log('~~~~~~~~~~~~>', !!buttonToGetAllRows);
+        if (await buttonToGetAllRows.getAttribute('all-rows-displayed') == "no") {
+            console.log('------------> get all rows')
+            await buttonToGetAllRows.click()
+        }
+        await tableElement.waitForSelector('[all-rows-displayed=yes]', {state: 'attached'});
+        console.log('~~~~~~~~~~~~>', 'están todos');
+        var trows = await tableElement.$$('tbody tr');
+        console.log('~~~~~~~~~~~~>', trows.length);
+        var result = await Promise.all(trows.map(async row => this.getFieldData(target, await this.tdForNames(row, columnNames))));
+        console.log('~~~~~~~~~~~~>', 'ufs');
+        return result;
+    }
+
+    private async tdForNames(tableElement: ElementHandle<HTMLLIElement>, columnNames: string[]){
+        return Promise.all(columnNames.map(async name => ({name, element: (await tableElement.waitForSelector(`[my-colname=${name}]`))!})));
+    }
+
+    override async tableDataTest<T extends Description>(target: {table: string, description:T} | string, rows: Row[], compare: 'all', opts?: { fixedFields?: EasyFixedFields; }): Promise<void> {
+        if (typeof target == "string") throw new Error("must use {table, description} in tableDataTest for Navigators")
+        console.log('############>', target.table);
+        var tableElement = await this.openGrid(target.table, opts?.fixedFields ?? {});
+        console.log('############>', !!tableElement);
+        var response = await this.getAllVisibleRowsFromGrid(target, tableElement, rows.length ? Object.keys(rows) : []);
+        console.log('############>', response);
+        this.compareRows(response, rows, compare);
+        console.log('############>', 'ok!');
     }
 
     // Utilidades específicas del browser
@@ -302,6 +376,22 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             this.page.waitForNavigation(),
             this.page.click(`${selector} button[type="submit"], ${selector} input[type="submit"]`)
         ]);
+    }
+
+    async explain(handler:ElementHandle<HTMLLIElement>){
+        console.log(await handler.evaluate((el) => {
+            var result = [] as string[];
+            var calculateDatails = (el:any) => {
+                if (el.parentElement != null && el.parentElement != el && result.length<20) calculateDatails(el.parentElement);
+                var attributes = el.tagName + (el.id ? '#' +el.id : '') + el.className.split(/\s+/).filter((c:any) => c).map((c:string) => '.' + c).join('');
+                for (const attr of el.attributes as {name:string, value:string}[]) {
+                    attributes += '['+attr.name+'='+attr.value+']';
+                }
+                result.push(attributes);
+            }
+            calculateDatails(el);
+            return result;
+        }));
     }
 }
 
