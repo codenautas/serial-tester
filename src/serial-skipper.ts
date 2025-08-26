@@ -6,6 +6,7 @@ import * as discrepances from 'discrepances';
 import { DefinedType, Description } from 'guarantee-type';
 import { PartialOnUndefinedDeep } from 'type-fest';
 import * as json4all from 'json4all';
+import { sameValue } from 'best-globals';
 
 export type BrowserType = 'chromium' | 'firefox' | 'webkit';
 
@@ -228,6 +229,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         console.log('================> button', !!insButton, (status == 'new'), rowToSave)
         if (status == 'new') {
             insButton.click();
+            var pkSelector = `:not([pk-values])`
             console.log('================> clicked', !!insButton)
             console.log(rowToSave, status, primaryKeyValues)
             var tableRow = await tableElement.waitForSelector('> tbody > tr:not([pk-values])', {state:'visible'});
@@ -235,9 +237,10 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             await Promise.all([tableRow].map(handler => this.explain(handler)));
         } else {
             var JsonPk = this.getJsonPkValues(target.table, rowToSave, primaryKeyValues);
+            var pkSelector = `[pk-values=${escapeCss(JsonPk)}]`
             console.log('================> search', JsonPk)
-            console.log('================> searching', `> tbody > tr[pk-values=${escapeCss(JsonPk)}]`)
-            var tableRow = await tableElement.waitForSelector(`> tbody > tr[pk-values=${escapeCss(JsonPk)}]`);
+            console.log('================> searching', `> tbody > tr${pkSelector}`)
+            var tableRow = await tableElement.waitForSelector(`> tbody > tr${pkSelector}`);
             console.log('================> updating column pk =', await tableRow.getAttribute('pk-values'))
         }
         var touchedElements = [] as {name:string, element:(typeof tableRow)}[];
@@ -250,15 +253,10 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             try{
                 var element = (await tableRow.waitForSelector(`> [my-colname=${name}]`, {timeout: 1000}));
             }catch(err){
-                if (status == 'new') {
-                    try {
-                        var element = (await tableElement.waitForSelector(`> tbody > tr:not([pk-values]) > [my-colname=${name}]`, {timeout: 1000}));
-                    }catch(err){
-                        console.log('===========> ERROR ins!', err)
-                        throw err;
-                    }
-                } else {
-                    console.log('===========> ERROR!', err)
+                try {
+                    var element = (await tableElement.waitForSelector(`> tbody > tr${pkSelector} > [my-colname=${name}]`, {timeout: 1000}));
+                }catch(err){
+                    console.log('===========> ERROR ins!', err)
                     throw err;
                 }
             }
@@ -280,7 +278,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         }
         await this.page.keyboard.press("Tab")
         console.log('-------> saving');
-        await Promise.all(touchedElements.map(({name}) => tableRow.waitForSelector(`> [my-colname=${name}][io-status=temporal-ok],[my-colname=${name}][io-status=ok],[my-colname=${name}]:not([io-status])`)))
+        await Promise.all(touchedElements.map(({name}) => tableElement.waitForSelector(`> tr${pkSelector} > [my-colname=${name}][io-status=temporal-ok],[my-colname=${name}][io-status=ok],[my-colname=${name}]:not([io-status])`)))
         console.log('-------> saved');
         return this.getFieldData(target, touchedElements)
     }
@@ -328,7 +326,27 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         console.log('############>', target.table);
         var tableElement = await this.openGrid(target.table, opts?.fixedFields ?? {});
         console.log('############>', !!tableElement);
-        var response = await this.getAllVisibleRowsFromGrid(target, tableElement, rows.length ? Object.keys(rows) : []);
+        if (opts?.fixedFields && !(opts?.fixedFields instanceof Array) && opts?.fixedFields instanceof Object) {
+            var ff = opts?.fixedFields;
+            rows = rows.map(row => {
+                for (const name in opts?.fixedFields) {
+                    if (sameValue(row[name], ff[name])) {
+                        delete row[name];
+                    } else {
+                        throw new Error(`Error in fixedFields in tableDataTest doesn't match the rows in ${name} field`)
+                    };
+                }
+                return row;
+            });
+        }
+        var response = await this.getAllVisibleRowsFromGrid(target, tableElement, rows.length ? Object.keys(rows[0]!) : []);
+        if (opts?.fixedFields && !(opts?.fixedFields instanceof Array) && opts?.fixedFields instanceof Object) {
+            for (const row of response) {
+                for (const name in opts?.fixedFields) {
+                    if (row[name] == null) row[name] = opts?.fixedFields[name];
+                }
+            }
+        }
         console.log('############>', response);
         this.compareRows(response, rows, compare);
         console.log('############>', 'ok!');
