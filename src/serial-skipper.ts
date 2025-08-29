@@ -1,12 +1,12 @@
 import { Browser, Page, BrowserContext, chromium, firefox, webkit, ElementHandle } from 'playwright';
-import { EmulatedSession, Credentials, startBackendAPIContext, AppBackendConstructor, Contexts, EasyFixedFields, Row } from './serial-api';
+import { EmulatedSession, Credentials, startBackendAPIContext, AppBackendConstructor, Contexts, EasyFixedFields, Row, RowDescription } from './serial-api';
 export * from './serial-api';
 import { AppBackend } from 'backend-plus';
 import * as discrepances from 'discrepances';
 import { DefinedType, Description } from 'guarantee-type';
 import { PartialOnUndefinedDeep } from 'type-fest';
 import * as json4all from 'json4all';
-import { sameValue } from 'best-globals';
+import { date, sameValue, RealDate } from 'best-globals';
 
 export type BrowserType = 'chromium' | 'firefox' | 'webkit';
 
@@ -189,10 +189,19 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         return null;
     }
     
-    keystrokeStringOfrow<T extends string|boolean|number>(value: T){
+    keystrokeStringOfrow<T extends string|boolean|number|Date|RealDate>(value: T){
         switch (typeof value) {
         case "boolean":
             return value ? "Y" : "N";
+        case "object":
+            if (value == null) return '';
+            if (value instanceof Date) {
+                // @ts-expect-error in best-globals this is not resolved as a type.
+                if (value.isRealDate) return value.toDmy();
+                return value.getDate()+'/'+(value.getMonth()+1)+'/'+value.getFullYear();
+            }
+            // @ts-ignore fallback
+            return value.toString();
         default:
             return value.toLocaleString();
         }
@@ -203,10 +212,22 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
     valueFromVisualRepresentation(representation:string|null, type:Description):any{
         if (representation == null) {
             if ('nullable' in type || 'optional' in type) return null;
-            throw new Error(`valueFromVisualRepresentation error NUUL IS not a ${JSON.stringify(type)}`)
+            throw new Error(`valueFromVisualRepresentation error NUL IS not a ${JSON.stringify(type)}`)
         }
+        if ('nullable' in type) return this.valueFromVisualRepresentation(representation, type.nullable);
+        if ('optional' in type) return this.valueFromVisualRepresentation(representation, type.optional);
         if ('string' in type) return representation;
         if ('boolean' in type) return this.booleanRepresentation[representation];
+        if ('number' in type) return parseFloat(representation);
+        if ('class' in type && type.class == Date) {
+            try{
+                var parts = representation.split('/').map(n=>parseFloat(n)) as unknown as [number,1|2|3|4|5|6|7|8|9|10|11|12,number];
+                console.log('date', representation, parts)
+                return date.ymd(parts[2], parts[1], parts[0]);
+            } catch (err) {
+                throw err
+            }
+        }
         throw new Error(`valueFromVisualRepresentation error ${representation} not a ${JSON.stringify(type)}`)
     }
 
@@ -224,47 +245,34 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
     override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'):Promise<DefinedType<T>>
     override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>
     override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>{
+        var description: Record<string, Description> = (target.description as RowDescription).object!;
         var tableElement = await this.openGrid(target.table, {})
         var insButton = await tableElement.waitForSelector('button[bp-action=INS]');
         console.log('================> button', !!insButton, (status == 'new'), rowToSave)
-        if (status == 'new') {
-            insButton.click();
-            var pkSelector = `:not([pk-values])`
-            console.log('================> clicked', !!insButton)
-            console.log(rowToSave, status, primaryKeyValues)
-            var tableRow = await tableElement.waitForSelector('> tbody > tr:not([pk-values])', {state:'visible'});
-            console.log('================> inserting column pk =', await tableRow.getAttribute('pk-values'))
-            await Promise.all([tableRow].map(handler => this.explain(handler)));
-        } else {
-            var JsonPk = this.getJsonPkValues(target.table, rowToSave, primaryKeyValues);
-            var pkSelector = `[pk-values=${escapeCss(JsonPk)}]`
-            console.log('================> search', JsonPk)
-            console.log('================> searching', `> tbody > tr${pkSelector}`)
-            var tableRow = await tableElement.waitForSelector(`> tbody > tr${pkSelector}`);
-            console.log('================> updating column pk =', await tableRow.getAttribute('pk-values'))
-        }
-        var touchedElements = [] as {name:string, element:(typeof tableRow)}[];
-        for(var name in rowToSave){
-            var prevInputElement = touchedElements[touchedElements.length - 1]?.element;
-            var elements = (await tableRow.$$(`>[my-colname=${name}]`));
-            console.log('================> selectores', elements.length);
-            await Promise.all(elements.map(handler => this.explain(handler)));
-            console.log('================> explained!')
-            try{
-                var element = (await tableRow.waitForSelector(`> [my-colname=${name}]`, {timeout: 1000}));
-            }catch(err){
-                try {
-                    var element = (await tableElement.waitForSelector(`> tbody > tr${pkSelector} > [my-colname=${name}]`, {timeout: 1000}));
-                }catch(err){
-                    console.log('===========> ERROR ins!', err)
-                    throw err;
-                }
+        async function foundTableRow(emulator:BrowserEmulatedSession<TApp>, withPk:boolean){
+            if (!withPk) {
+                insButton.click();
+                var pkSelector = `:not([pk-values])`
+                console.log('================> clicked', !!insButton)
+                console.log(rowToSave, status, primaryKeyValues)
+                var result = await tableElement.waitForSelector('> tbody > tr:not([pk-values]):not([dummy])', {state:'visible'});
+                console.log('================> inserting column pk =', await result.getAttribute('pk-values'))
+                await Promise.all([result].map(handler => emulator.explain(handler)));
+            } else {
+                var JsonPk = emulator.getJsonPkValues(target.table, rowToSave, primaryKeyValues);
+                var pkSelector = `[pk-values=${escapeCss(JsonPk)}]`
+                console.log('================> search', JsonPk)
+                console.log('================> searching', `> tbody > tr${pkSelector}`)
+                var result = await tableElement.waitForSelector(`> tbody > tr${pkSelector}`);
+                console.log('================> updating column pk =', await result.getAttribute('pk-values'))
             }
+            return result;
+        }
+        var tableRow = await foundTableRow(this, status != 'new');
+        var prevInputElement:ElementHandle<HTMLLIElement> | undefined;
+        for(var name in rowToSave){
+            var element = (await tableRow.waitForSelector(`> [my-colname=${name}]`, {timeout: 1000}));
             console.log('================> have selector', !!tableRow)
-            console.log('================> ufiss pk =', await tableRow.getAttribute('pk-values'), ' content =',await element.textContent())
-            await element.waitForElementState('visible');
-            console.log('================> check pk =', await tableRow.getAttribute('pk-values'), ' content =',await element.textContent())
-            console.log('-------> columna', name)
             if (prevInputElement != null && await areConsecutives(this.page, prevInputElement, element)) {
                 console.log('*tab*')
                 await this.page.keyboard.press('Tab')
@@ -274,13 +282,24 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
                 console.log('focus', name, await element.getAttribute('my-colname'));
             }
             await this.page.keyboard.insertText(this.keystrokeStringOfrow(rowToSave[name]));
-            touchedElements.push({name, element});
         }
         await this.page.keyboard.press("Tab")
         console.log('-------> saving');
-        await Promise.all(touchedElements.map(({name}) => tableElement.waitForSelector(`> tr${pkSelector} > [my-colname=${name}][io-status=temporal-ok],[my-colname=${name}][io-status=ok],[my-colname=${name}]:not([io-status])`)))
+        var touchedElements = await Promise.all(Object.keys(description).filter(name => name[0] != '$').map(async (name) => ({
+            name, 
+            element:await tableRow.waitForSelector(`> [my-colname=${name}][io-status=temporal-ok], > [my-colname=${name}][io-status=ok], > [my-colname=${name}]:not([io-status])`, {state:'attached'})
+        })))
         console.log('-------> saved');
-        return this.getFieldData(target, touchedElements)
+        var fieldData = await this.getFieldData(target, touchedElements)
+        console.log('-------> data1', fieldData);
+        if ("$allow.delete" in description) {
+            fieldData["$allow.delete"] = !!await tableRow.getAttribute(`can-delete`);
+        }
+        if ("$allow.update" in description) {
+            fieldData["$allow.update"] = !!await tableRow.getAttribute('can-update');
+        }
+        console.log('-------> data2', fieldData, description);
+        return fieldData;
     }
 
     private async getFieldData<T extends Description>(target: {table: string, description:T}, pairsNameElement:{name:string, element:ElementHandle<HTMLLIElement>}[]){

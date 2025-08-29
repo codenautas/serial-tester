@@ -15,6 +15,8 @@ import * as discrepances from 'discrepances';
 
 export type AppBackendConstructor<T> = new() => T;
 
+export type RowDescription = {object: Record<string, Description>}
+
 declare module "backend-plus"{
     interface AppConfig{
         test?:{
@@ -199,9 +201,9 @@ export class EmulatedSession<TApp extends AppBackend>{
         var tableDef = this.server.tableStructures[table](context);
         return JSON4all.stringify(primaryKeyValues ?? tableDef.primaryKey.map(f => rowToSave[f]));
     }
-    async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'):Promise<DefinedType<T>>
-    async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>
-    async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>{
+    async saveRecord<T extends RowDescription>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'):Promise<DefinedType<T>>
+    async saveRecord<T extends RowDescription>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>
+    async saveRecord<T extends RowDescription>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>{
         const {table, description} = target
         var result = await this.request({
             path:'/table_record_save',
