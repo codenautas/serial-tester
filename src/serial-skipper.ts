@@ -349,7 +349,9 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             var ff = opts?.fixedFields;
             rows = rows.map(row => {
                 for (const name in opts?.fixedFields) {
-                    if (sameValue(row[name], ff[name])) {
+                    if (!(name in row)) {
+                        // ok!
+                    } else if (sameValue(row[name], ff[name])) {
                         delete row[name];
                     } else {
                         throw new Error(`Error in fixedFields in tableDataTest doesn't match the rows in ${name} field`)
