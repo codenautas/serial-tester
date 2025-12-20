@@ -5,22 +5,22 @@
     "main": "dist/serial-skipper.js",
     "types": "dist/serial-skipper.d.ts",
     "dependencies": {
-        "backend-plus": "^2.5.2-betha.15",
-        "best-globals": "^2.0.1",
+        "backend-plus": "^2.5.2-betha.32",
+        "best-globals": "^2.0.2",
         "cast-error": "^0.1.2",
         "discrepances": "^0.2.9",
         "guarantee-type": "^0.2.2",
         "json4all": "^1.4.0",
         "like-ar": "^0.5.1",
         "mini-tools": "^1.13.4",
-        "playwright": "^1.54.2",
-        "type-fest": "^4.41.0"
+        "playwright": "^1.57.0",
+        "type-fest": "^5.3.1"
     },
     "devDependencies": {
-        "@types/node": "^24.1.0",
+        "@types/node": "^25.0.3",
         "@types/mocha": "^10.0.10",
-        "mocha": "^11.7.1",
-        "typescript": "^5.9.2"
+        "mocha": "^11.7.5",
+        "typescript": "^5.9.3"
     },
     "scripts": {
         "prepare": "tsc -p src",
