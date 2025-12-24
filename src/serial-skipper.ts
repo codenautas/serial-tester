@@ -1,5 +1,5 @@
 import { Browser, Page, BrowserContext, chromium, firefox, webkit, ElementHandle } from 'playwright';
-import { EmulatedSession, Credentials, startBackendAPIContext, AppBackendConstructor, Contexts, EasyFixedFields, Row, RowDescription } from './serial-api';
+import { EmulatedSession, Credentials, startContext, AppBackendConstructor, Contexts, EasyFixedFields, Row, RowDescription } from './serial-api';
 export * from './serial-api';
 import { AppBackend } from 'backend-plus';
 import * as discrepances from 'discrepances';
@@ -7,8 +7,15 @@ import { DefinedType, Description } from 'guarantee-type';
 import { PartialOnUndefinedDeep } from 'type-fest';
 import * as json4all from 'json4all';
 import { date, sameValue, RealDate } from 'best-globals';
+import { unexpected } from 'cast-error';
 
 export type BrowserType = 'chromium' | 'firefox' | 'webkit';
+
+export const TO = {
+    beLoaded: 1000,
+    loggedIn: 5000,
+    noWaitMustBeThere:10
+}
 
 export interface BrowserConfig {
     browserType?: BrowserType;
@@ -101,10 +108,13 @@ export async function startBrowser(browserConfig?: BrowserConfig): Promise<Brows
 }
 
 export async function startNavigatorContext<T extends AppBackend>(AppConstructor: AppBackendConstructor<T>, browserConfig?: BrowserConfig):Promise<Contexts<T>>{
-    const backend = await startBackendAPIContext(AppConstructor);
-    const browser = await startBrowser(browserConfig);
-    return {...backend, createSession: () => new BrowserEmulatedSession(backend.backend, browser, backend.backend.config.server.port)};
+    return startContext(AppConstructor, async () => {        
+        const browser = await startBrowser(browserConfig);
+        return { sessionFactory: (backend: T, port:number) => new BrowserEmulatedSession(backend, browser, port) }
+    });
 }
+
+
 
 async function areConsecutives<T extends ElementHandle>(page: Page, el1:T, el2:T){
     return page.evaluate(
@@ -184,17 +194,20 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             }
             throw new Error(`Login failed. Current URL: ${currentUrl}`);
         }
-        var activeUserSpan = await this.page.waitForSelector('#total-layout #active-user', { timeout: 5000 });
+        var activeUserSpan = await this.page.waitForSelector('#total-layout #active-user', { timeout: TO.loggedIn });
         discrepances.showAndThrow(await activeUserSpan.textContent(), credentials.username);
+        this.config = await this.page.evaluate(() => 
+            JSON.parse(localStorage.getItem('setup') || '{}')
+        );
         return null;
     }
     
     keystrokeStringOfrow<T extends string|boolean|number|Date|RealDate>(value: T){
+        if (value == null) return '';
         switch (typeof value) {
         case "boolean":
             return value ? "Y" : "N";
         case "object":
-            if (value == null) return '';
             if (value instanceof Date) {
                 // @ts-expect-error in best-globals this is not resolved as a type.
                 if (value.isRealDate) return value.toDmy();
@@ -210,7 +223,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
     booleanRepresentation = {no: false, yes: true, si: true, sí: true, Sí:true, Si: true} as Record<string, boolean>;
     // valueFromVisualRepresentation(representation:string|null, type:{string: Opts}):string
     valueFromVisualRepresentation(representation:string|null, type:Description):any{
-        if (representation == null) {
+        if (representation == null || representation === '') {
             if ('nullable' in type || 'optional' in type) return null;
             throw new Error(`valueFromVisualRepresentation error NUL IS not a ${JSON.stringify(type)}`)
         }
@@ -222,7 +235,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         if ('class' in type && type.class == Date) {
             try{
                 var parts = representation.split('/').map(n=>parseFloat(n)) as unknown as [number,1|2|3|4|5|6|7|8|9|10|11|12,number];
-                console.log('date', representation, parts)
+                if (this.verbose) console.log('date', representation, parts)
                 return date.ymd(parts[2], parts[1], parts[0]);
             } catch (err) {
                 throw err
@@ -232,12 +245,12 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
     }
 
     async openGrid(table: string, filter:Record<string, any>){
-        console.log('================>', !!this.page)
+        if (this.verbose) console.log('================>', !!this.page)
         if (this.page == null) throw new Error("openGrid with no open page")
         const url = new URL(`./menu#table=${table}${filter ? `&ff=${json4all.toUrl(filter)}` : ``}`, this.baseUrl).toString();
-        console.log('================> going to', url)
+        if (this.verbose) console.log('================> going to', url)
         await this.page.goto(url);
-        console.log('================> there')
+        if (this.verbose) console.log('================> there')
         var tableElement = await this.page.waitForSelector('table.my-grid');
         return tableElement;
     }
@@ -248,103 +261,110 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         var description: Record<string, Description> = (target.description as RowDescription).object!;
         var tableElement = await this.openGrid(target.table, {})
         var insButton = await tableElement.waitForSelector('button[bp-action=INS]');
-        console.log('================> button', !!insButton, (status == 'new'), rowToSave)
-        async function foundTableRow(emulator:BrowserEmulatedSession<TApp>, withPk:boolean){
+        if (this.verbose) console.log('================> button', !!insButton, (status == 'new'), rowToSave)
+        const foundTableRow = async (emulator:BrowserEmulatedSession<TApp>, withPk:boolean) => {
             if (!withPk) {
                 insButton.click();
                 var pkSelector = `:not([pk-values])`
-                console.log('================> clicked', !!insButton)
-                console.log(rowToSave, status, primaryKeyValues)
+                if (this.verbose) console.log('================> clicked', !!insButton)
+                if (this.verbose) console.log(rowToSave, status, primaryKeyValues)
                 var result = await tableElement.waitForSelector('> tbody > tr:not([pk-values]):not([dummy])', {state:'visible'});
-                console.log('================> inserting column pk =', await result.getAttribute('pk-values'))
+                if (this.verbose) console.log('================> inserting column pk =', await result.getAttribute('pk-values'))
                 await Promise.all([result].map(handler => emulator.explain(handler)));
             } else {
                 var JsonPk = emulator.getJsonPkValues(target.table, rowToSave, primaryKeyValues);
                 var pkSelector = `[pk-values=${escapeCss(JsonPk)}]`
-                console.log('================> search', JsonPk)
-                console.log('================> searching', `> tbody > tr${pkSelector}`)
+                if (this.verbose) console.log('================> search', JsonPk)
+                if (this.verbose) console.log('================> searching', `> tbody > tr${pkSelector}`)
                 var result = await tableElement.waitForSelector(`> tbody > tr${pkSelector}`);
-                console.log('================> updating column pk =', await result.getAttribute('pk-values'))
+                if (this.verbose) console.log('================> updating column pk =', await result.getAttribute('pk-values'))
             }
             return result;
         }
         var tableRow = await foundTableRow(this, status != 'new');
         var prevInputElement:ElementHandle<HTMLLIElement> | undefined;
         for(var name in rowToSave){
-            var element = (await tableRow.waitForSelector(`> [my-colname=${name}]`, {timeout: 1000}));
-            console.log('================> have selector', !!tableRow)
+            var element = (await tableRow.waitForSelector(`> [my-colname=${name}]`, {timeout: TO.beLoaded}));
+            if (this.verbose) console.log('================> have selector', !!tableRow)
             if (prevInputElement != null && await areConsecutives(this.page, prevInputElement, element)) {
-                console.log('*tab*')
+                if (this.verbose) console.log('*tab*')
                 await this.page.keyboard.press('Tab')
             } else {
                 await element.focus();
                 await this.page.keyboard.press("Shift+End")
-                console.log('focus', name, await element.getAttribute('my-colname'));
+                if (this.verbose) console.log('focus', name, await element.getAttribute('my-colname'));
             }
             await this.page.keyboard.insertText(this.keystrokeStringOfrow(rowToSave[name]));
         }
         await this.page.keyboard.press("Tab")
-        console.log('-------> saving');
+        if (this.verbose) console.log('-------> saving');
         var touchedElements = await Promise.all(Object.keys(description).filter(name => name[0] != '$').map(async (name) => ({
             name, 
             element:await tableRow.waitForSelector(`> [my-colname=${name}][io-status=temporal-ok], > [my-colname=${name}][io-status=ok], > [my-colname=${name}]:not([io-status])`, {state:'attached'})
         })))
-        console.log('-------> saved');
+        if (this.verbose) console.log('-------> saved');
         var fieldData = await this.getFieldData(target, touchedElements)
-        console.log('-------> data1', fieldData);
+        if (this.verbose) console.log('-------> data1', fieldData);
         if ("$allow.delete" in description) {
             fieldData["$allow.delete"] = !!await tableRow.getAttribute(`can-delete`);
         }
         if ("$allow.update" in description) {
             fieldData["$allow.update"] = !!await tableRow.getAttribute('can-update');
         }
-        console.log('-------> data2', fieldData, description);
+        if (this.verbose) console.log('-------> data2', fieldData, description);
         return fieldData;
     }
 
     private async getFieldData<T extends Description>(target: {table: string, description:T}, pairsNameElement:{name:string, element:ElementHandle<HTMLLIElement>}[]){
+        if (this.verbose) console.log('================> entro')
         if (!('object' in target.description)) throw new Error('description must be {object:{...}}');
         var description: Record<string, Description> = target.description.object;
+        if (this.verbose) console.log('================> veo', description)
         var touched = await Promise.all(
                 pairsNameElement.map(
                     async ({name, element}) => [name, this.valueFromVisualRepresentation(await element.textContent(), description[name]!)]
                 )
             )
-        console.log('================> acá', touched)
+        if (this.verbose) console.log('================> acá', touched)
         var result = Object.fromEntries(
             touched
         );
-        console.log('================> ufs', result)
+        if (this.verbose) console.log('================> ufs', result)
         return result;
         // return guarantee(target.description, result);
     }
 
     private async getAllVisibleRowsFromGrid<T extends Description>(target: {table: string, description:T}, tableElement: ElementHandle<HTMLLIElement>, columnNames:string[]):Promise<DefinedType<T>[]>{
-        console.log('~~~~~~~~~~~~>', target.table);
-        var buttonToGetAllRows = await tableElement.waitForSelector('[all-rows-displayed]', {state: 'attached'});
-        console.log('~~~~~~~~~~~~>', !!buttonToGetAllRows);
-        if (await buttonToGetAllRows.getAttribute('all-rows-displayed') == "no") {
-            console.log('------------> get all rows')
-            await buttonToGetAllRows.click()
+        if (this.verbose) console.log('~~~~~~~~~~~~>', target.table);
+        try {
+            var buttonToGetAllRows = await tableElement.waitForSelector('[all-rows-displayed]', {state: 'attached'});
+            if (this.verbose) console.log('~~~~~~~~~~~~>', !!buttonToGetAllRows);
+            if (await buttonToGetAllRows.getAttribute('all-rows-displayed') == "no") {
+                if (this.verbose) console.log('------------> get all rows')
+                await buttonToGetAllRows.click()
+            }
+            await tableElement.waitForSelector('[all-rows-displayed=yes]', {state: 'attached'});
+            if (this.verbose) console.log('~~~~~~~~~~~~>', 'están todos:');
+            var trows = await tableElement.$$('tbody tr');
+            if (this.verbose) console.log('~~~~~~~~~~~~>', trows.length);
+            if (this.verbose) console.log('~~~~~~~~~~~~>', await Promise.all(trows.map(async e=>(await e.getProperty('id')).jsonValue())));
+            var result = await Promise.all(trows.map(async row => this.getFieldData(target, await this.tdForNames(row, columnNames))));
+            if (this.verbose) console.log('~~~~~~~~~~~~>', 'ufs');
+            return result;
+        }catch(err){
+            throw unexpected(err);
         }
-        await tableElement.waitForSelector('[all-rows-displayed=yes]', {state: 'attached'});
-        console.log('~~~~~~~~~~~~>', 'están todos');
-        var trows = await tableElement.$$('tbody tr');
-        console.log('~~~~~~~~~~~~>', trows.length);
-        var result = await Promise.all(trows.map(async row => this.getFieldData(target, await this.tdForNames(row, columnNames))));
-        console.log('~~~~~~~~~~~~>', 'ufs');
-        return result;
     }
 
     private async tdForNames(tableElement: ElementHandle<HTMLLIElement>, columnNames: string[]){
-        return Promise.all(columnNames.map(async name => ({name, element: (await tableElement.waitForSelector(`[my-colname=${name}]`))!})));
+        return Promise.all(columnNames.map(async name => ({name, element: (await tableElement.waitForSelector(`[my-colname=${name}]`, {timeout: TO.noWaitMustBeThere}))!})));
     }
 
     override async tableDataTest<T extends Description>(target: {table: string, description:T} | string, rows: Row[], compare: 'all', opts?: { fixedFields?: EasyFixedFields; }): Promise<void> {
         if (typeof target == "string") throw new Error("must use {table, description} in tableDataTest for Navigators")
-        console.log('############>', target.table);
+        if (this.verbose) console.log('############>', target.table);
         var tableElement = await this.openGrid(target.table, opts?.fixedFields ?? {});
-        console.log('############>', !!tableElement);
+        if (this.verbose) console.log('############>', !!tableElement);
         if (opts?.fixedFields && !(opts?.fixedFields instanceof Array) && opts?.fixedFields instanceof Object) {
             var ff = opts?.fixedFields;
             rows = rows.map(row => {
@@ -368,9 +388,9 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
                 }
             }
         }
-        console.log('############>', response);
+        if (this.verbose) console.log('############>', response);
         this.compareRows(response, rows, compare);
-        console.log('############>', 'ok!');
+        if (this.verbose) console.log('############>', 'ok!');
     }
 
     // Utilidades específicas del browser

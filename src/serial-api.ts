@@ -57,9 +57,25 @@ export async function startServer<T extends AppBackend>(AppConstructor: AppBacke
     return server;
 }
 
-export async function startBackendAPIContext<T extends AppBackend>(AppConstructor: AppBackendConstructor<T>):Promise<Contexts<T>>{
+export async function startContext<T extends AppBackend>(
+    AppConstructor: AppBackendConstructor<T>, 
+    getInternals: () => Promise<{
+        sessionFactory: (backend:T, port:number) => EmulatedSession<T>
+    }>
+){
     const backend = await startServer(AppConstructor);
-    return {backend, createSession: () => new EmulatedSession(backend, backend.config.server.port)};
+    const context:Partial<Contexts<T>> = {backend};
+    const internals  = await getInternals();
+    context.createSession = () => {
+        const session = internals.sessionFactory(backend, backend.config.server.port);
+        if (context.verbose) session.verbose = context.verbose;
+        return session;
+    }
+    return context as Contexts<T>;
+}
+
+export async function startBackendAPIContext<T extends AppBackend>(AppConstructor: AppBackendConstructor<T>):Promise<Contexts<T>>{
+    return startContext(AppConstructor, async () => ({sessionFactory:(backend: T, port:number) => new EmulatedSession(backend, port)}));
 }
 
 export type AnyValue = string|number|Date|boolean|null
@@ -80,7 +96,8 @@ export type ResultAs = 'JSON+' | 'text' | 'JSON' | 'bp-login-error';
 
 export interface Contexts<TApp extends AppBackend>{
     backend: TApp;
-    createSession: () => EmulatedSession<TApp>;
+    verbose?: boolean;
+    createSession():EmulatedSession<TApp>;
 }
 
 export class EmulatedSession<TApp extends AppBackend>{
@@ -89,6 +106,7 @@ export class EmulatedSession<TApp extends AppBackend>{
     private cookies:string[] = []
     public config:ClientConfig | undefined
     public parseResult: ResultAs = 'JSON+';
+    public verbose: boolean = false;
     protected server:TApp
     constructor(engines: TApp, port:number){
         this.server = engines;
@@ -161,8 +179,8 @@ export class EmulatedSession<TApp extends AppBackend>{
                 if (line != null) notices.push(line);
             } while (lines.length);
             if (notices.length) {
-                console.log("notices")
-                console.log(notices)
+                if (this.verbose) console.log("notices")
+                if (this.verbose) console.log(notices)
             }
             throw new Error('result not received');
         case 'bp-login-error':
@@ -252,7 +270,7 @@ export class EmulatedSession<TApp extends AppBackend>{
                 try{
                     discrepances.showAndThrow(filteredReponseRows, expected);
                 } catch (err) {
-                    console.log('======================================', filteredReponseRows, expected)
+                    if (this.verbose) console.log('======================================', filteredReponseRows, expected)
                     throw err;
                 }
             break;
