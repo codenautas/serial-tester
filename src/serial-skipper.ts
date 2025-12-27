@@ -182,7 +182,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         if (this.verbose || true) console.log('to evaluate', this.baseUrl, target, method, headers, body);
         var result = await this.page.evaluate(async ({target, method, headers, body, onlyHeaders})=>{
             console.log('to fetch', target, method, headers, body);
-            var response = await fetch(target, {method, headers, body/* , redirect: 'manual'*/});
+            var response = await fetch(target, {method, headers, body, credentials: 'include'/* , redirect: 'manual'*/});
             console.log('response', response.status);
             if (onlyHeaders) {
                 return {status: response.status, location: response.headers.get('location')};

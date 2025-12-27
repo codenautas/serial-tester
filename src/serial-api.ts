@@ -155,7 +155,7 @@ export class EmulatedSession<TApp extends AppBackend>{
         target:{procedure:string, parameters:T, result:U}, 
         params:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>
     ):Promise<DefinedType<NoInfer<U>>>{
-        var mandatoryParameters = target.parameters;
+        var mandatoryParameters = 'object' in target.parameters ? target.parameters.object : {};
         var result = await this.request({
             path: '/'+target.procedure,
             payload: {
