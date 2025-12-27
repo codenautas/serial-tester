@@ -87,6 +87,8 @@ export type FixedFields = {fieldName:string, value:any, until?:AnyValue}[]
 export type EasyFixedFields = null|undefined|FixedFields|Record<string,AnyValue|[AnyValue, AnyValue]>
 
 export type Methods = 'get'|'post'|'put'|'patch'|'delete'|'head'
+export type ResponseHeaders = {status:number, location:string|null}
+
 
 export interface ClientConfig{
     config: AppConfigClientSetup
@@ -112,14 +114,26 @@ export class EmulatedSession<TApp extends AppBackend>{
         this.server = engines;
         this.baseUrl = `http://localhost:${port}${this.server.config.server["base-url"]}/`;
     }
-    private async request(params:{path:string, payload:any, onlyHeaders:boolean}):ReturnType<typeof fetch>;
-    private async request<T = any>(params:{path:string, method:'get', parseResult:'text'}):Promise<string>;
-    private async request<T = any>(params:{path:string, method:'get', parseResult:ResultAs}):Promise<T>;
-    private async request<T = any>(params:{path:string, payload:any}):Promise<T>;
-    private async request(params:{path:string, payload?:any, onlyHeaders?:boolean, method?:Methods, parseResult?:ResultAs}):Promise<any> {
+    protected async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:true):Promise<ResponseHeaders>
+    protected async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders?:false):Promise<string>
+    protected async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders?:boolean):Promise<ResponseHeaders|string>
+    protected async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders?:boolean):Promise<ResponseHeaders|string> {
+        var response = await fetch(target, {method, headers, body, redirect: 'manual'});
+        this.cookies = response.headers.getSetCookie();
+        if (onlyHeaders) {
+            return {status: response.status, location: response.headers.get('location')};
+        } else {
+            return await response.text()
+        }
+    }
+    protected async request(params:{path:string, payload:any, onlyHeaders:true}):Promise<ResponseHeaders>;
+    protected async request<T = any>(params:{path:string, method:'get', parseResult:'text'}):Promise<string>;
+    protected async request<T = any>(params:{path:string, method:'get', parseResult:ResultAs}):Promise<T>;
+    protected async request<T = any>(params:{path:string, payload:any}):Promise<T>;
+    protected async request(params:{path:string, payload?:any, onlyHeaders?:true, method?:Methods, parseResult?:ResultAs}):Promise<any> {
         const {path, payload} = params;
         const method = params.method ?? 'post';
-        const onlyHeaders = params.onlyHeaders ?? (method == 'head' ? true : false);
+        const onlyHeaders:boolean|undefined = params.onlyHeaders ?? (method == 'head' ? true : false);
         const parseResult = params.parseResult ?? (method == 'get' ? 'text' : this.parseResult);
         var body = payload == null ? payload : new URLSearchParams(payload);
         var headers = {} as Record<string, string>
@@ -130,12 +144,11 @@ export class EmulatedSession<TApp extends AppBackend>{
             headers.Cookie = this.cookies.map(c => c.split(';')[0]).join('; ');
         }
         var target = Path.posix.join(this.baseUrl, path);
-        var response = await fetch(target, {method, headers, body, redirect: 'manual'});
-        this.cookies = response.headers.getSetCookie();
-        if (onlyHeaders) {
-            return response;
+        var result = await this.fetch(target, method, headers, body, onlyHeaders)
+        if (typeof result == "string") {
+            return this.getResult(result, parseResult);
         } else {
-            return this.getResult(response, parseResult);
+            return result;
         }
     }
     async callProcedure<T extends Description, U extends Description>(
@@ -151,11 +164,9 @@ export class EmulatedSession<TApp extends AppBackend>{
                 ...(LikeAr(params).map(value => JSON4all.stringify(value)).plain())
             }
         })
-        // return result;
         return guarantee(target.result, result);
     }
-    private async getResult(request:Awaited<ReturnType<typeof fetch>>, parseResult?:ResultAs){
-        var result = await request.text();
+    protected async getResult(result:string, parseResult?:ResultAs){
         switch (parseResult) {
         case 'text':
             return result;
@@ -192,16 +203,16 @@ export class EmulatedSession<TApp extends AppBackend>{
     }
     async login(credentials: Credentials, opts:{returnErrorMessage?:boolean} = {}) {
         var payload = credentials;
-        var request = await this.request({path:'/login', payload, onlyHeaders:true});
-        if (request.status != 302) throw new Error("se esperaba una redirección");
-        var result = request.headers.get('location');
-        if (result?.replace(/^\./, '') != this.server.config.login.plus.successRedirect){
+        var result = await this.request({path:'/login', payload, onlyHeaders:true});
+        if (result.status != 302) throw new Error("se esperaba una redirección");
+        var location = result.location;
+        if (location?.replace(/^\./, '') != this.server.config.login.plus.successRedirect){
             if (opts.returnErrorMessage) {
-                var errorMessage = await this.request({path:result!, method:'get', parseResult:'bp-login-error'});
+                var errorMessage = await this.request({path:location!, method:'get', parseResult:'bp-login-error'});
                 return errorMessage;
             } else {
-                discrepances.showAndThrow(result?.replace(/^\./,''), this.server.config.login.plus.successRedirect);
-                return result;
+                discrepances.showAndThrow(location?.replace(/^\./,''), this.server.config.login.plus.successRedirect);
+                return location;
             }
         } else {
             this.config = await this.request<ClientConfig>({path:'/client-setup', method:'get', parseResult:'JSON'});

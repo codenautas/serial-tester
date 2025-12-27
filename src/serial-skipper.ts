@@ -1,5 +1,9 @@
 import { Browser, Page, BrowserContext, chromium, firefox, webkit, ElementHandle } from 'playwright';
-import { EmulatedSession, Credentials, startContext, AppBackendConstructor, Contexts, EasyFixedFields, Row, RowDescription } from './serial-api';
+import { AppBackendConstructor, Contexts, Credentials,
+    EasyFixedFields, EmulatedSession, Methods,
+    ResponseHeaders, Row, RowDescription,
+    startContext
+} from './serial-api';
 export * from './serial-api';
 import { AppBackend } from 'backend-plus';
 import * as discrepances from 'discrepances';
@@ -108,13 +112,11 @@ export async function startBrowser(browserConfig?: BrowserConfig): Promise<Brows
 }
 
 export async function startNavigatorContext<T extends AppBackend>(AppConstructor: AppBackendConstructor<T>, browserConfig?: BrowserConfig):Promise<Contexts<T>>{
-    return startContext(AppConstructor, async () => {        
+    return startContext(AppConstructor, async () => {
         const browser = await startBrowser(browserConfig);
         return { sessionFactory: (backend: T, port:number) => new BrowserEmulatedSession(backend, browser, port) }
     });
 }
-
-
 
 async function areConsecutives<T extends ElementHandle>(page: Page, el1:T, el2:T){
     return page.evaluate(
@@ -123,7 +125,6 @@ async function areConsecutives<T extends ElementHandle>(page: Page, el1:T, el2:T
         }, [el1, el2]
     );
 }
-
 
 // BrowserContext representa una sesión de usuario independiente
 export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSession<TApp> {
@@ -175,6 +176,26 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         await super.closeSession();
     }
 
+    protected override async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:true):Promise<ResponseHeaders>
+    protected override async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:false):Promise<string>
+    protected override async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:boolean):Promise<ResponseHeaders|string> {
+        if (this.verbose || true) console.log('to evaluate', this.baseUrl, target, method, headers, body);
+        var result = await this.page.evaluate(async ({target, method, headers, body, onlyHeaders})=>{
+            console.log('to fetch', target, method, headers, body);
+            var response = await fetch(target, {method, headers, body/* , redirect: 'manual'*/});
+            console.log('response', response.status);
+            if (onlyHeaders) {
+                return {status: response.status, location: response.headers.get('location')};
+            } else {
+                var result = await response.text();
+                console.log(result)
+                return result;
+            }
+        }, {target, method, headers, body: body.toString(), onlyHeaders});
+                console.log(result)
+        return result;
+    }
+
     override async login(credentials: Credentials, opts: { returnErrorMessage?: boolean } = {}): Promise<string | null> {
         await this.initSession();
         if (!this.page) throw new Error('Browser session not initialized');
@@ -207,6 +228,8 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         switch (typeof value) {
         case "boolean":
             return value ? "Y" : "N";
+        case "number":
+            return value.toString();
         case "object":
             if (value instanceof Date) {
                 // @ts-expect-error in best-globals this is not resolved as a type.
@@ -270,7 +293,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
                 if (this.verbose) console.log(rowToSave, status, primaryKeyValues)
                 var result = await tableElement.waitForSelector('> tbody > tr:not([pk-values]):not([dummy])', {state:'visible'});
                 if (this.verbose) console.log('================> inserting column pk =', await result.getAttribute('pk-values'))
-                await Promise.all([result].map(handler => emulator.explain(handler)));
+                if (this.verbose) await Promise.all([result].map(handler => emulator.explain(handler)));
             } else {
                 var JsonPk = emulator.getJsonPkValues(target.table, rowToSave, primaryKeyValues);
                 var pkSelector = `[pk-values=${escapeCss(JsonPk)}]`
@@ -285,7 +308,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         var prevInputElement:ElementHandle<HTMLLIElement> | undefined;
         for(var name in rowToSave){
             var element = (await tableRow.waitForSelector(`> [my-colname=${name}]`, {timeout: TO.beLoaded}));
-            if (this.verbose) console.log('================> have selector', !!tableRow)
+            if (this.verbose) console.log('================> have selector', !!tableRow, name, this.keystrokeStringOfrow(rowToSave[name]))
             if (prevInputElement != null && await areConsecutives(this.page, prevInputElement, element)) {
                 if (this.verbose) console.log('*tab*')
                 await this.page.keyboard.press('Tab')
