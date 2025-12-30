@@ -18,7 +18,7 @@ export type BrowserType = 'chromium' | 'firefox' | 'webkit';
 export const TO = {
     beLoaded: 1000,
     loggedIn: 5000,
-    noWaitMustBeThere:10
+    noWaitMustBeThere:100
 }
 
 export interface BrowserConfig {
@@ -161,7 +161,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         });
         this.page = await this.context.newPage();
         this.page.on('console', msg => console.log(`[Browser Session] ${msg.text()}`));
-        this.page.on('pageerror', err => console.error(`[Browser Session] ${err.message}`));
+        this.page.on('pageerror', err => console.error(`[Browser Session] ${err.message} \n ${err.stack}`));
     }
 
     override async closeSession(): Promise<void> {
@@ -176,22 +176,28 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         await super.closeSession();
     }
 
-    protected override async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:true):Promise<ResponseHeaders>
-    protected override async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:false):Promise<string>
-    protected override async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:boolean):Promise<ResponseHeaders|string> {
-        if (this.verbose || true) console.log('to evaluate', this.baseUrl, target, method, headers, body);
-        var result = await this.page.evaluate(async ({target, method, headers, body, onlyHeaders})=>{
-            console.log('to fetch', target, method, headers, body);
-            var response = await fetch(target, {method, headers, body, credentials: 'include'/* , redirect: 'manual'*/});
-            console.log('response', response.status);
-            if (onlyHeaders) {
-                return {status: response.status, location: response.headers.get('location')};
-            } else {
-                var result = await response.text();
-                console.log(result)
-                return result;
+    protected override async fetch(path: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:true):Promise<ResponseHeaders>
+    protected override async fetch(path: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:false):Promise<string>
+    protected override async fetch(path: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:boolean):Promise<ResponseHeaders|string> {
+        if (this.verbose) console.log('to evaluate', this.baseUrl, path, method, headers, body);
+        var result = await this.page.evaluate(async ({path, method, headers, body, onlyHeaders})=>{
+            console.log('to fetch', path, method, headers, body);
+            try{
+                console.log('localStorage', localStorage?.setup?.slice?.(0,20) ?? 'NO SETUP');
+                var response = await fetch('.'+path, {method, headers, body, credentials: 'include'/* , redirect: 'manual'*/});
+                console.log('response', response.status);
+                if (onlyHeaders) {
+                    return {status: response.status, location: response.headers.get('location')};
+                } else {
+                    var result = await response.text();
+                    console.log(result)
+                    return result;
+                }
+            }catch(err){
+                console.log('**** CATCHED!', err);
+                throw err;
             }
-        }, {target, method, headers, body: body.toString(), onlyHeaders});
+        }, {path, method, headers, body: body.toString(), onlyHeaders});
                 console.log(result)
         return result;
     }
@@ -270,7 +276,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
     async openGrid(table: string, filter:Record<string, any>){
         if (this.verbose) console.log('================>', !!this.page)
         if (this.page == null) throw new Error("openGrid with no open page")
-        const url = new URL(`./menu#table=${table}${filter ? `&ff=${json4all.toUrl(filter)}` : ``}`, this.baseUrl).toString();
+        const url = new URL(`./menu#table=${table}${filter ? `&ff=${json4all.toUrl(this.toFixedField(filter))}` : ``}`, this.baseUrl).toString();
         if (this.verbose) console.log('================> going to', url)
         await this.page.goto(url);
         if (this.verbose) console.log('================> there')
@@ -284,12 +290,12 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         var description: Record<string, Description> = (target.description as RowDescription).object!;
         var tableElement = await this.openGrid(target.table, {})
         var insButton = await tableElement.waitForSelector('button[bp-action=INS]');
-        if (this.verbose) console.log('================> button', !!insButton, (status == 'new'), rowToSave)
+        if (this.verbose || true) console.log('================> save record', target.table, !!insButton, (status == 'new'), rowToSave)
         const foundTableRow = async (emulator:BrowserEmulatedSession<TApp>, withPk:boolean) => {
             if (!withPk) {
                 insButton.click();
                 var pkSelector = `:not([pk-values])`
-                if (this.verbose) console.log('================> clicked', !!insButton)
+                if (this.verbose || true) console.log('================> clicked', !!insButton)
                 if (this.verbose) console.log(rowToSave, status, primaryKeyValues)
                 var result = await tableElement.waitForSelector('> tbody > tr:not([pk-values]):not([dummy])', {state:'visible'});
                 if (this.verbose) console.log('================> inserting column pk =', await result.getAttribute('pk-values'))
@@ -368,7 +374,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             }
             await tableElement.waitForSelector('[all-rows-displayed=yes]', {state: 'attached'});
             if (this.verbose) console.log('~~~~~~~~~~~~>', 'están todos:');
-            var trows = await tableElement.$$('tbody tr');
+            var trows = await tableElement.$$(':scope > tbody > tr');
             if (this.verbose) console.log('~~~~~~~~~~~~>', trows.length);
             if (this.verbose) console.log('~~~~~~~~~~~~>', await Promise.all(trows.map(async e=>(await e.getProperty('id')).jsonValue())));
             var result = await Promise.all(trows.map(async row => this.getFieldData(target, await this.tdForNames(row, columnNames))));
@@ -380,7 +386,15 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
     }
 
     private async tdForNames(tableElement: ElementHandle<HTMLLIElement>, columnNames: string[]){
-        return Promise.all(columnNames.map(async name => ({name, element: (await tableElement.waitForSelector(`[my-colname=${name}]`, {timeout: TO.noWaitMustBeThere}))!})));
+        // var id=Math.random()
+        // console.log('************', columnNames,id)
+        // return Promise.all(columnNames.map(async name => ({name, element: (await tableElement.waitForSelector(`[my-colname=${name}]`, {timeout: TO.noWaitMustBeThere}))!})));
+        return Promise.all(columnNames.map(async name => {
+            // console.log('¿?', name, id)
+            var x = await tableElement.waitForSelector(`[my-colname=${name}]`, {timeout: TO.noWaitMustBeThere});
+            // console.log('ok', name, id);
+            return ({name, element: x})
+        }));
     }
 
     override async tableDataTest<T extends Description>(target: {table: string, description:T} | string, rows: Row[], compare: 'all', opts?: { fixedFields?: EasyFixedFields; }): Promise<void> {
@@ -392,18 +406,22 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             var ff = opts?.fixedFields;
             rows = rows.map(row => {
                 for (const name in opts?.fixedFields) {
-                    if (!(name in row)) {
+                    var ffv = ff[name];
+                    if (!(name in row) || ffv instanceof Array) {
                         // ok!
-                    } else if (sameValue(row[name], ff[name])) {
+                    } else if (sameValue(row[name], ffv)) {
                         delete row[name];
                     } else {
+                        console.log(row[name], ff[name])
                         throw new Error(`Error in fixedFields in tableDataTest doesn't match the rows in ${name} field`)
                     };
                 }
                 return row;
             });
         }
-        var response = await this.getAllVisibleRowsFromGrid(target, tableElement, rows.length ? Object.keys(rows[0]!) : []);
+        var objectDescription: Record<string, Description> = 'object' in target.description ? target.description.object : {};
+        var columnNames = (rows.length ? Object.keys(rows[0]!) : []).filter(name => objectDescription[name])
+        var response = await this.getAllVisibleRowsFromGrid(target, tableElement, columnNames);
         if (opts?.fixedFields && !(opts?.fixedFields instanceof Array) && opts?.fixedFields instanceof Object) {
             for (const row of response) {
                 for (const name in opts?.fixedFields) {

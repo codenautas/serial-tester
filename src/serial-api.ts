@@ -114,10 +114,11 @@ export class EmulatedSession<TApp extends AppBackend>{
         this.server = engines;
         this.baseUrl = `http://localhost:${port}${this.server.config.server["base-url"]}/`;
     }
-    protected async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:true):Promise<ResponseHeaders>
-    protected async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders?:false):Promise<string>
-    protected async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders?:boolean):Promise<ResponseHeaders|string>
-    protected async fetch(target: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders?:boolean):Promise<ResponseHeaders|string> {
+    protected async fetch(path: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:true):Promise<ResponseHeaders>
+    protected async fetch(path: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders?:false):Promise<string>
+    protected async fetch(path: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders?:boolean):Promise<ResponseHeaders|string>
+    protected async fetch(path: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders?:boolean):Promise<ResponseHeaders|string> {
+        var target = Path.posix.join(this.baseUrl, path);
         var response = await fetch(target, {method, headers, body, redirect: 'manual'});
         this.cookies = response.headers.getSetCookie();
         if (onlyHeaders) {
@@ -143,8 +144,7 @@ export class EmulatedSession<TApp extends AppBackend>{
         if (this.cookies.length > 0) {
             headers.Cookie = this.cookies.map(c => c.split(';')[0]).join('; ');
         }
-        var target = Path.posix.join(this.baseUrl, path);
-        var result = await this.fetch(target, method, headers, body, onlyHeaders)
+        var result = await this.fetch(path, method, headers, body, onlyHeaders)
         if (typeof result == "string") {
             return this.getResult(result, parseResult);
         } else {
@@ -249,7 +249,7 @@ export class EmulatedSession<TApp extends AppBackend>{
         discrepances.showAndThrow(command, discrepances.test(x => x=='INSERT' || x=='UPDATE'));
         return row;
     }
-    toFixedField(param:EasyFixedFields): FixedFields{
+    protected toFixedField(param:EasyFixedFields): FixedFields{
         if (param == null) return [];
         if (param instanceof Array) return param;
         const result = Object.keys(param).map(fieldName => {var value = param[fieldName]; return value instanceof Array ? {fieldName, value:value[0], until:value[1]} : {fieldName, value}})
