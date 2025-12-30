@@ -42,4 +42,21 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci
       - run: npm test
-      - run: npm publish
+      - run: |
+          VERSION=$(node -p "require('./package.json').version")
+          case $VERSION in
+            *beta*)
+              TAG="--tag beta"
+              ;;
+            *alpha*)
+              TAG="--tag alpha"
+              ;;
+            *rc*)
+              TAG="--tag rc"
+              ;;
+            *)
+              TAG=""
+              ;;
+          esac
+          echo "Publishing version $VERSION with tag: $TAG"
+          npm publish $TAG

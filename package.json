@@ -24,6 +24,6 @@
     },
     "scripts": {
         "prepare": "tsc -p src",
-        "test": "echo ok"
+        "test": "echo no tests yet"
     }
 }
