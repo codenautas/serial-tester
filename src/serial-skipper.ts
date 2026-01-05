@@ -11,7 +11,7 @@ import { DefinedType, Description } from 'guarantee-type';
 import { PartialOnUndefinedDeep } from 'type-fest';
 import * as json4all from 'json4all';
 import { date, sameValue, RealDate } from 'best-globals';
-import { unexpected } from 'cast-error';
+import { expected, unexpected } from 'cast-error';
 
 export type BrowserType = 'chromium' | 'firefox' | 'webkit';
 
@@ -285,15 +285,16 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
     }
 
     override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'):Promise<DefinedType<T>>
-    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>
-    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>{
+    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]|null):Promise<DefinedType<T>>
+    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]|null):Promise<DefinedType<T>>{
         var description: Record<string, Description> = (target.description as RowDescription).object!;
-        var tableElement = await this.openGrid(target.table, {})
-        var insButton = await tableElement.waitForSelector('button[bp-action=INS]');
-        if (this.verbose || true) console.log('================> save record', target.table, !!insButton, (status == 'new'), rowToSave)
+        var filter = primaryKeyValues === undefined ? {} : this.getPkFilter(target.table, rowToSave, primaryKeyValues);
+        var tableElement = await this.openGrid(target.table, filter)
+        var insButton = await tableElement.waitForSelector('button[bp-action=INS]', {state:'visible'});
+        if (this.verbose || true) console.log('================> save record', target.table, !!insButton, (status == 'new'), rowToSave, {filter})
         const foundTableRow = async (emulator:BrowserEmulatedSession<TApp>, withPk:boolean) => {
             if (!withPk) {
-                insButton.click();
+                await insButton.click();
                 var pkSelector = `:not([pk-values])`
                 if (this.verbose || true) console.log('================> clicked', !!insButton)
                 if (this.verbose) console.log(rowToSave, status, primaryKeyValues)
@@ -305,32 +306,62 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
                 var pkSelector = `[pk-values=${escapeCss(JsonPk)}]`
                 if (this.verbose) console.log('================> search', JsonPk)
                 if (this.verbose) console.log('================> searching', `> tbody > tr${pkSelector}`)
-                var result = await tableElement.waitForSelector(`> tbody > tr${pkSelector}`);
+                try {
+                    var result = await tableElement.waitForSelector(`> tbody > tr${pkSelector}`, {timeout: TO.noWaitMustBeThere});
+                } catch (err) {
+                    var error = expected(err);
+                    if (error.name == 'TimeoutError' && primaryKeyValues === undefined) {
+                        return null;
+                    } else {
+                        console.log('!!!!!!!!!!!!!!', err);
+                        throw err;
+                    }
+                }
                 if (this.verbose) console.log('================> updating column pk =', await result.getAttribute('pk-values'))
             }
             return result;
         }
         var tableRow = await foundTableRow(this, status != 'new');
+        if (tableRow == null) {
+            // let result = await this.saveRecord(target, rowToSave, 'update', primaryKeyValues);
+            let result = await this.saveRecord(target, rowToSave as PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, 'update', null);
+            if (result == null) {
+                throw new Error("Error Double saveRecord fail")
+            }
+            return result;
+        }
         var prevInputElement:ElementHandle<HTMLLIElement> | undefined;
         for(var name in rowToSave){
-            var element = (await tableRow.waitForSelector(`> [my-colname=${name}]`, {timeout: TO.beLoaded}));
-            if (this.verbose) console.log('================> have selector', !!tableRow, name, this.keystrokeStringOfrow(rowToSave[name]))
-            if (prevInputElement != null && await areConsecutives(this.page, prevInputElement, element)) {
-                if (this.verbose) console.log('*tab*')
-                await this.page.keyboard.press('Tab')
+            if (name in filter && name in rowToSave && sameValue(rowToSave[name], filter[name])) {
+                // skip edit, same value
             } else {
-                await element.focus();
-                await this.page.keyboard.press("Shift+End")
-                if (this.verbose) console.log('focus', name, await element.getAttribute('my-colname'));
+                var element = (await tableRow.waitForSelector(`> [my-colname=${name}]`, {timeout: TO.beLoaded}));
+                if (this.verbose) console.log('================> have selector', !!tableRow, name, this.keystrokeStringOfrow(rowToSave[name]))
+                if (prevInputElement != null && await areConsecutives(this.page, prevInputElement, element)) {
+                    if (this.verbose) console.log('*tab*')
+                    await this.page.keyboard.press('Tab')
+                } else {
+                    await element.focus();
+                    await this.page.keyboard.press("Shift+End")
+                    if (this.verbose) console.log('focus', name, await element.getAttribute('my-colname'));
+                }
+                await this.page.keyboard.insertText(this.keystrokeStringOfrow(rowToSave[name]));
             }
-            await this.page.keyboard.insertText(this.keystrokeStringOfrow(rowToSave[name]));
         }
         await this.page.keyboard.press("Tab")
         if (this.verbose) console.log('-------> saving');
         var touchedElements = await Promise.all(Object.keys(description).filter(name => name[0] != '$').map(async (name) => ({
             name, 
-            element:await tableRow.waitForSelector(`> [my-colname=${name}][io-status=temporal-ok], > [my-colname=${name}][io-status=ok], > [my-colname=${name}]:not([io-status])`, {state:'attached'})
+            element:await tableRow!.waitForSelector(`> [my-colname=${name}][io-status=temporal-ok], > [my-colname=${name}][io-status=ok], > [my-colname=${name}][io-status=error], > [my-colname=${name}]:not([io-status])`, {state:'attached'}),
+            "io-status": null as string | null
         })))
+        await Promise.all(touchedElements.map(async info => info["io-status"] = await element.getAttribute('io-status')))
+        if (touchedElements.some(info => info["io-status"] == "error")) {
+            let error = new Error("Error in navigator saving record in table " + target.table, {});
+            // @ts-ignore
+            error.code = 'UI_ERR'
+            throw error;
+        }
         if (this.verbose) console.log('-------> saved');
         var fieldData = await this.getFieldData(target, touchedElements)
         if (this.verbose) console.log('-------> data1', fieldData);
@@ -407,12 +438,15 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             rows = rows.map(row => {
                 for (const name in opts?.fixedFields) {
                     var ffv = ff[name];
+                    if (row[name]?.isRealDate && typeof ffv == "string") {
+                        ffv = date.iso(ffv);
+                    }
                     if (!(name in row) || ffv instanceof Array) {
                         // ok!
                     } else if (sameValue(row[name], ffv)) {
                         delete row[name];
                     } else {
-                        console.log(row[name], ff[name])
+                        console.log(`Error in fixedFields in tableDataTest doesn't match the rows`, row[name], ff[name]);
                         throw new Error(`Error in fixedFields in tableDataTest doesn't match the rows in ${name} field`)
                     };
                 }

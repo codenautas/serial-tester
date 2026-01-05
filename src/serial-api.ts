@@ -228,7 +228,15 @@ export class EmulatedSession<TApp extends AppBackend>{
         }
         var context = this.server.getContextForDump();
         var tableDef = this.server.tableStructures[table](context);
-        return JSON4all.stringify(primaryKeyValues ?? tableDef.primaryKey.map(f => rowToSave[f]));
+        return JSON.stringify(primaryKeyValues ?? tableDef.primaryKey.map(f => rowToSave[f]));
+    }
+    getPkFilter<T extends Description>(table: string, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, primaryKeyValues:undefined|null|any[]): Record<string, any> {
+        if (this.server.tableStructures[table] == null) {
+            throw new Error(`table "${table}" not found in server.tableStructures`);
+        }
+        var context = this.server.getContextForDump();
+        var tableDef = this.server.tableStructures[table](context);
+        return Object.fromEntries(tableDef.primaryKey.map((fieldName, i) => [fieldName, primaryKeyValues ? primaryKeyValues[i] : rowToSave[fieldName]]))
     }
     async saveRecord<T extends RowDescription>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'):Promise<DefinedType<T>>
     async saveRecord<T extends RowDescription>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>
@@ -308,7 +316,7 @@ export function expectError(action: ()=>void|Promise<void>, check: string): void
     function checkExpected(err:Error|unknown) {
         if (allOk) throw new Error("expectError -> not ERROR!");
         var error = expected(err);
-        if (error.code != check) {
+        if (error.code != check && error.code != 'UI_ERR') {
             console.log(`Expected "${check}" error code. Gotten "${error.code}:  ${error.message}"`)
             throw err;
         }

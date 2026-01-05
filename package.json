@@ -2,7 +2,10 @@
     "name": "serial-tester",
     "description": "Tester for backend-plus apps",
     "version": "0.3.0-rc.1",
-    "repository": "https://github.com/codenautas/serial-tester.git",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/codenautas/serial-tester.git"
+    },
     "main": "dist/serial-skipper.js",
     "types": "dist/serial-skipper.d.ts",
     "dependencies": {
