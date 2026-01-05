@@ -1,7 +1,7 @@
 {
     "name": "serial-tester",
     "description": "Tester for backend-plus apps",
-    "version": "0.3.0-rc.1",
+    "version": "0.3.0-rc.2",
     "repository": {
         "type": "git",
         "url": "git+https://github.com/codenautas/serial-tester.git"
