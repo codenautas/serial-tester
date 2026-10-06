@@ -246,7 +246,7 @@ export class EmulatedSession<TApp extends AppBackend>{
             path:'/table_record_save',
             payload:{
                 table,
-                primaryKeyValues: this.getJsonPkValues(table, rowToSave, primaryKeyValues),
+                primaryKeyValues: this.getJsonPkValues<T>(table, rowToSave, primaryKeyValues),
                 newRow: JSON4all.stringify(rowToSave),
                 oldRow: JSON4all.stringify({}),
                 status

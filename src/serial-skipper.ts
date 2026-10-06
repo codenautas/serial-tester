@@ -288,7 +288,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
     override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]|null):Promise<DefinedType<T>>
     override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]|null):Promise<DefinedType<T>>{
         var description: Record<string, Description> = (target.description as RowDescription).object!;
-        var filter = primaryKeyValues === undefined ? {} : this.getPkFilter(target.table, rowToSave, primaryKeyValues);
+        var filter = primaryKeyValues === undefined ? {} : this.getPkFilter<T>(target.table, rowToSave, primaryKeyValues);
         var tableElement = await this.openGrid(target.table, filter)
         var insButton = await tableElement.waitForSelector('button[bp-action=INS]', {state:'visible'});
         if (this.verbose || true) console.log('================> save record', target.table, !!insButton, (status == 'new'), rowToSave, {filter})
@@ -355,7 +355,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             element:await tableRow!.waitForSelector(`> [my-colname=${name}][io-status=temporal-ok], > [my-colname=${name}][io-status=ok], > [my-colname=${name}][io-status=error], > [my-colname=${name}]:not([io-status])`, {state:'attached'}),
             "io-status": null as string | null
         })))
-        await Promise.all(touchedElements.map(async info => info["io-status"] = await element.getAttribute('io-status')))
+        await Promise.all(touchedElements.map(async info => info["io-status"] = await info.element.getAttribute('io-status')))
         if (touchedElements.some(info => info["io-status"] == "error")) {
             let error = new Error("Error in navigator saving record in table " + target.table, {});
             // @ts-ignore
