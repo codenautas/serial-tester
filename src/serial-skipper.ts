@@ -281,6 +281,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         await this.page.goto(url);
         if (this.verbose) console.log('================> there')
         var tableElement = await this.page.waitForSelector('table.my-grid');
+        await tableElement.waitForSelector('[all-rows-displayed]', {state: 'attached'});
         return tableElement;
     }
 
