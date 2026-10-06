@@ -1,7 +1,7 @@
 import { Browser, Page, BrowserContext, chromium, firefox, webkit, ElementHandle } from 'playwright';
 import { AppBackendConstructor, Contexts, Credentials,
-    EasyFixedFields, EmulatedSession, Methods,
-    ResponseHeaders, Row, RowDescription,
+    EmulatedSession, Methods,
+    ResponseHeaders, Row, RowDescription, SaveRecordOptions, TableDataTestOptions,
     startContext
 } from './serial-api';
 export * from './serial-api';
@@ -284,9 +284,9 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         return tableElement;
     }
 
-    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'):Promise<DefinedType<T>>
-    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]|null):Promise<DefinedType<T>>
-    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]|null):Promise<DefinedType<T>>{
+    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new', primaryKeyValues?:undefined, opts?:SaveRecordOptions):Promise<DefinedType<T>>
+    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]|null, opts?:SaveRecordOptions):Promise<DefinedType<T>>
+    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]|null, opts?:SaveRecordOptions):Promise<DefinedType<T>>{
         var description: Record<string, Description> = (target.description as RowDescription).object!;
         var filter = primaryKeyValues === undefined ? {} : this.getPkFilter<T>(target.table, rowToSave, primaryKeyValues);
         var tableElement = await this.openGrid(target.table, filter)
@@ -302,7 +302,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
                 if (this.verbose) console.log('================> inserting column pk =', await result.getAttribute('pk-values'))
                 if (this.verbose) await Promise.all([result].map(handler => emulator.explain(handler)));
             } else {
-                var JsonPk = emulator.getJsonPkValues(target.table, rowToSave, primaryKeyValues);
+                var JsonPk = emulator.getJsonPkValues<T>(target.table, rowToSave, primaryKeyValues);
                 var pkSelector = `[pk-values=${escapeCss(JsonPk)}]`
                 if (this.verbose) console.log('================> search', JsonPk)
                 if (this.verbose) console.log('================> searching', `> tbody > tr${pkSelector}`)
@@ -324,16 +324,28 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         var tableRow = await foundTableRow(this, status != 'new');
         if (tableRow == null) {
             // let result = await this.saveRecord(target, rowToSave, 'update', primaryKeyValues);
-            let result = await this.saveRecord(target, rowToSave as PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, 'update', null);
+            let result = await this.saveRecord(target, rowToSave as PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, 'update', null, opts);
             if (result == null) {
                 throw new Error("Error Double saveRecord fail")
             }
             return result;
         }
+        var namesToEdit = Object.keys(rowToSave).filter(name => rowToSave[name] !== undefined && !(name in filter && sameValue(rowToSave[name], filter[name])));
+        var hiddenNames = [] as string[];
+        for (var nameToEdit of namesToEdit) {
+            var cell = await tableRow.waitForSelector(`> [my-colname=${nameToEdit}]`, {state:'attached', timeout: TO.beLoaded});
+            if (!await cell.isVisible()) hiddenNames.push(nameToEdit);
+        }
+        if (hiddenNames.length) {
+            if (!opts?.unhide) {
+                throw new Error(`Hidden columns ${hiddenNames.join(', ')} in grid ${target.table}. Use {unhide:true} in saveRecord`);
+            }
+            await this.unhideColumns(tableElement, hiddenNames);
+        }
         var prevInputElement:ElementHandle<HTMLLIElement> | undefined;
         for(var name in rowToSave){
-            if (name in filter && name in rowToSave && sameValue(rowToSave[name], filter[name])) {
-                // skip edit, same value
+            if (!namesToEdit.includes(name)) {
+                // skip edit, same value or undefined
             } else {
                 var element = (await tableRow.waitForSelector(`> [my-colname=${name}]`, {timeout: TO.beLoaded}));
                 if (this.verbose) console.log('================> have selector', !!tableRow, name, this.keystrokeStringOfrow(rowToSave[name]))
@@ -373,6 +385,22 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         }
         if (this.verbose) console.log('-------> data2', fieldData, description);
         return fieldData;
+    }
+
+    private async unhideColumns(tableElement: ElementHandle<HTMLLIElement>, columnNames: string[]){
+        var menuButton = await tableElement.waitForSelector('button[bp-action=MENU]', {state:'visible', timeout: TO.beLoaded});
+        await menuButton.click();
+        var menuOption = await this.page.waitForSelector('#menu-hide-or-show', {state:'visible', timeout: TO.beLoaded});
+        await menuOption.click();
+        var selectToShow = await this.page.waitForSelector('select#show-columns', {state:'visible', timeout: TO.beLoaded});
+        var hiddenColumns = await selectToShow.$$eval('option', options => options.map(option => option.value));
+        var columnsToShow = columnNames.filter(name => hiddenColumns.includes(name));
+        if (this.verbose) console.log('================> unhide', columnsToShow);
+        if (columnsToShow.length) {
+            await selectToShow.selectOption(columnsToShow);
+        }
+        var okButton = await this.page.waitForSelector('button.hide-or-show', {state:'visible', timeout: TO.beLoaded});
+        await okButton.click();
     }
 
     private async getFieldData<T extends Description>(target: {table: string, description:T}, pairsNameElement:{name:string, element:ElementHandle<HTMLLIElement>}[]){
@@ -428,7 +456,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         }));
     }
 
-    override async tableDataTest<T extends Description>(target: {table: string, description:T} | string, rows: Row[], compare: 'all', opts?: { fixedFields?: EasyFixedFields; }): Promise<void> {
+    override async tableDataTest<T extends Description>(target: {table: string, description:T} | string, rows: Row[], compare: 'all', opts?: TableDataTestOptions): Promise<void> {
         if (typeof target == "string") throw new Error("must use {table, description} in tableDataTest for Navigators")
         if (this.verbose) console.log('############>', target.table);
         var tableElement = await this.openGrid(target.table, opts?.fixedFields ?? {});
@@ -455,6 +483,9 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         }
         var objectDescription: Record<string, Description> = 'object' in target.description ? target.description.object : {};
         var columnNames = (rows.length ? Object.keys(rows[0]!) : []).filter(name => objectDescription[name])
+        if (opts?.unhide) {
+            await this.unhideColumns(tableElement, columnNames);
+        }
         var response = await this.getAllVisibleRowsFromGrid(target, tableElement, columnNames);
         if (opts?.fixedFields && !(opts?.fixedFields instanceof Array) && opts?.fixedFields instanceof Object) {
             for (const row of response) {

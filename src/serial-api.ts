@@ -86,6 +86,9 @@ export type Credentials = {username:string, password:string}
 export type FixedFields = {fieldName:string, value:any, until?:AnyValue}[]
 export type EasyFixedFields = null|undefined|FixedFields|Record<string,AnyValue|[AnyValue, AnyValue]>
 
+export type SaveRecordOptions = {unhide?: boolean}
+export type TableDataTestOptions = {fixedFields?: EasyFixedFields, unhide?: boolean}
+
 export type Methods = 'get'|'post'|'put'|'patch'|'delete'|'head'
 export type ResponseHeaders = {status:number, location:string|null}
 
@@ -238,9 +241,9 @@ export class EmulatedSession<TApp extends AppBackend>{
         var tableDef = this.server.tableStructures[table](context);
         return Object.fromEntries(tableDef.primaryKey.map((fieldName, i) => [fieldName, primaryKeyValues ? primaryKeyValues[i] : rowToSave[fieldName]]))
     }
-    async saveRecord<T extends RowDescription>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'):Promise<DefinedType<T>>
-    async saveRecord<T extends RowDescription>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>
-    async saveRecord<T extends RowDescription>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]):Promise<DefinedType<T>>{
+    async saveRecord<T extends RowDescription>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new', primaryKeyValues?:undefined, opts?:SaveRecordOptions):Promise<DefinedType<T>>
+    async saveRecord<T extends RowDescription>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[], opts?:SaveRecordOptions):Promise<DefinedType<T>>
+    async saveRecord<T extends RowDescription>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[], _opts?:SaveRecordOptions):Promise<DefinedType<T>>{
         const {table, description} = target
         var result = await this.request({
             path:'/table_record_save',
@@ -263,14 +266,15 @@ export class EmulatedSession<TApp extends AppBackend>{
         const result = Object.keys(param).map(fieldName => {var value = param[fieldName]; return value instanceof Array ? {fieldName, value:value[0], until:value[1]} : {fieldName, value}})
         return result;
     }
-    async tableDataTest<T extends Description = any>(target: {table: string, description:T} | string, rows: Row[], compare: 'all', opts?: { fixedFields?: EasyFixedFields; }): Promise<void>{
+    async tableDataTest<T extends Description = any>(target: {table: string, description:T} | string, rows: Row[], compare: 'all', opts?: TableDataTestOptions): Promise<void>{
         var table = typeof target == "string" ? target : target.table;
+        var {unhide: _unhide, ...optsForRequest} = opts ?? {};
         var result = await this.request({
             path:'/table_data',
             payload:{
                 table,
                 paramFun:'{}',
-                ...opts,
+                ...optsForRequest,
                 fixedFields:JSON.stringify(this.toFixedField(opts?.fixedFields))
             }
         })
