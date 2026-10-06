@@ -18,7 +18,8 @@ export type BrowserType = 'chromium' | 'firefox' | 'webkit';
 export const TO = {
     beLoaded: 1000,
     loggedIn: 5000,
-    noWaitMustBeThere:100
+    noWaitMustBeThere:100,
+    beforeRetype: 1000
 }
 
 export interface BrowserConfig {
@@ -367,12 +368,34 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         }
         await this.page.keyboard.press("Tab")
         if (this.verbose) console.log('-------> saving');
-        var touchedElements = await Promise.all(Object.keys(description).filter(name => name[0] != '$').map(async (name) => ({
-            name, 
-            element:await tableRow!.waitForSelector(`> [my-colname=${name}][io-status=temporal-ok], > [my-colname=${name}][io-status=ok], > [my-colname=${name}][io-status=error], > [my-colname=${name}]:not([io-status])`, {state:'attached'}),
-            "io-status": null as string | null
-        })))
-        await Promise.all(touchedElements.map(async info => info["io-status"] = await info.element.getAttribute('io-status')))
+        var touchedElements = await this.waitFinalIoStatus(target.table, tableRow, Object.keys(description).filter(name => name[0] != '$'));
+        // a write-read-conflict is part of the UX: the user sees it, checks the value and retypes it once
+        var conflicts = [] as {name:string, element:ElementHandle<HTMLLIElement>}[];
+        for (var info of touchedElements) {
+            if (info["io-status"] == 'write-read-conflict' && namesToEdit.includes(info.name)) {
+                var shownValue = this.valueFromVisualRepresentation(await info.element.textContent(), description[info.name]!);
+                if (!sameValue(shownValue, rowToSave[info.name])) conflicts.push(info);
+            }
+        }
+        if (conflicts.length) {
+            if (this.verbose) console.log('================> write-read-conflict, retyping', conflicts.map(conflict => conflict.name));
+            await new Promise(resolve => setTimeout(resolve, TO.beforeRetype));
+            for (var conflict of conflicts) {
+                await conflict.element.focus();
+                await this.page.keyboard.press("Shift+End")
+                await this.page.keyboard.insertText(this.keystrokeStringOfrow(rowToSave[conflict.name]));
+                await this.page.keyboard.press("Tab")
+                await tableRow.waitForSelector(`> [my-colname=${conflict.name}]:not([io-status=write-read-conflict])`, {state:'attached'});
+            }
+            var retouchedElements = await this.waitFinalIoStatus(target.table, tableRow, conflicts.map(conflict => conflict.name));
+            for (var retouched of retouchedElements) {
+                var retypedValue = this.valueFromVisualRepresentation(await retouched.element.textContent(), description[retouched.name]!);
+                if (retouched["io-status"] == 'write-read-conflict' || !sameValue(retypedValue, rowToSave[retouched.name])) {
+                    throw new Error(`Error in navigator saving record in table ${target.table}: write-read-conflict in ${retouched.name} persists after retyping. Expected ${json4all.stringify(rowToSave[retouched.name])}, shown ${json4all.stringify(retypedValue)}, io-status ${retouched["io-status"]}`);
+                }
+                touchedElements = touchedElements.map(info => info.name == retouched.name ? retouched : info);
+            }
+        }
         if (touchedElements.some(info => info["io-status"] == "error")) {
             let error = new Error("Error in navigator saving record in table " + target.table, {});
             // @ts-ignore
@@ -390,6 +413,33 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         }
         if (this.verbose) console.log('-------> data2', fieldData, description);
         return fieldData;
+    }
+
+    private async waitFinalIoStatus(table: string, tableRow: ElementHandle<HTMLLIElement>, columnNames: string[]){
+        var finalStatuses = ['temporal-ok', 'ok', 'error', 'write-read-conflict'];
+        try {
+            return await Promise.all(columnNames.map(async (name) => {
+                var element = await tableRow.waitForSelector(
+                    finalStatuses.map(status => `> [my-colname=${name}][io-status=${status}]`).concat(`> [my-colname=${name}]:not([io-status])`).join(', '),
+                    {state:'attached'}
+                );
+                return {name, element, "io-status": await element.getAttribute('io-status')};
+            }));
+        } catch (err) {
+            var error = expected(err);
+            if (error.name != 'TimeoutError') throw err;
+            var rowConnected = await tableRow.evaluate(tr => 'isConnected' in tr && tr.isConnected === true);
+            var ioStatuses = await Promise.all(columnNames.map(async name => {
+                var cell = await tableRow.$(`> [my-colname=${name}]`);
+                return `${name}=${cell == null ? '(no cell)' : await cell.getAttribute('io-status')}`;
+            }));
+            try {
+                var screenshot = await this.takeScreenshot(`saveRecord-${table}`);
+            } catch (errScreenshot) {
+                var screenshot = `(screenshot failed: ${expected(errScreenshot).message})`;
+            }
+            throw new Error(`Timeout waiting final io-status saving record in table ${table}. Row connected: ${rowConnected}. io-status: ${ioStatuses.join(', ')}. Screenshot: ${screenshot}`, {cause: err});
+        }
     }
 
     private async unhideColumns(tableElement: ElementHandle<HTMLLIElement>, columnNames: string[]){
