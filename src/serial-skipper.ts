@@ -1,5 +1,5 @@
 import { Browser, Page, BrowserContext, chromium, firefox, webkit, ElementHandle } from 'playwright';
-import { AppBackendConstructor, Contexts, Credentials,
+import { AppBackendConstructor, ClientConfig, Contexts, Credentials,
     EmulatedSession, Methods,
     ResponseHeaders, Row, RowDescription, SaveRecordOptions, TableDataTestOptions,
     startContext
@@ -223,9 +223,13 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         }
         var activeUserSpan = await this.page.waitForSelector('#total-layout #active-user', { timeout: TO.loggedIn });
         discrepances.showAndThrow(await activeUserSpan.textContent(), credentials.username);
-        this.config = await this.page.evaluate(() => 
-            JSON.parse(localStorage.getItem('setup') || '{}')
-        );
+        var setup = await this.page.evaluate(() => {
+            var my = (globalThis as typeof globalThis & {my?: {getLocalVar(varName:string):ClientConfig|null}}).my;
+            if (my == null) throw new Error('backend-plus client (window.my) not found');
+            return my.getLocalVar('setup');
+        });
+        if (setup == null) throw new Error('client setup not found in localStorage');
+        this.config = setup;
         return null;
     }
     
