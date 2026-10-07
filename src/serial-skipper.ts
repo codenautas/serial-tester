@@ -397,7 +397,10 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             }
         }
         if (touchedElements.some(info => info["io-status"] == "error")) {
-            let error = new Error("Error in navigator saving record in table " + target.table, {});
+            var errorDetails = await Promise.all(touchedElements.filter(info => info["io-status"] == "error").map(async info =>
+                `${info.name}: ${await info.element.getAttribute('title')}`
+            ));
+            let error = new Error("Error in navigator saving record in table " + target.table + ". " + errorDetails.join('; '), {});
             // @ts-ignore
             error.code = 'UI_ERR'
             throw error;
