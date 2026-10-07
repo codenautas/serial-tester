@@ -537,7 +537,11 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             });
         }
         var objectDescription: Record<string, Description> = 'object' in target.description ? target.description.object : {};
-        var columnNames = (rows.length ? Object.keys(rows[0]!) : []).filter(name => objectDescription[name])
+        var columnNames = (rows.length ? Object.keys(rows[0]!) : [])
+        var columnsNotInDescription = columnNames.filter(name => !objectDescription[name]);
+        if (columnsNotInDescription.length) {
+            throw new Error(`tableDataTest: columns ${columnsNotInDescription.join(', ')} expected in rows but not in description of ${target.table}`);
+        }
         if (opts?.unhide) {
             await this.unhideColumns(tableElement, columnNames);
         }
