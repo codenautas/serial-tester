@@ -28,6 +28,7 @@ export interface BrowserConfig {
     slowMo?: number; // milliseconds to slow down operations
     recordVideo?: boolean;
     recordScreenshots?: boolean;
+    verbose?: boolean;
 }
 
 export interface SessionConfig {
@@ -74,7 +75,7 @@ class BrowserManager {
             args: ['--start-maximized', '--window-position=0,0']
         });
 
-        console.log(`Browser ${this.config.browserType} started`);
+        if (this.config.verbose) console.log(`Browser ${this.config.browserType} started`);
         return this.browser;
     }
 
@@ -82,7 +83,7 @@ class BrowserManager {
         if (this.browser) {
             await this.browser.close();
             this.browser = null;
-            console.log('Browser stopped');
+            if (this.config.verbose) console.log('Browser stopped');
         }
     }
 
@@ -161,7 +162,9 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             } : undefined
         });
         this.page = await this.context.newPage();
-        this.page.on('console', msg => console.log(`[Browser Session] ${msg.text()}`));
+        this.page.on('console', msg => {
+            if (this.verbose || msg.type() == 'error' || msg.type() == 'warning') console.log(`[Browser Session] ${msg.text()}`)
+        });
         this.page.on('pageerror', err => console.error(`[Browser Session] ${err.message} \n ${err.stack}`));
     }
 
@@ -181,25 +184,24 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
     protected override async fetch(path: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:false):Promise<string>
     protected override async fetch(path: string, method: Methods, headers: Record<string, string>, body: any, onlyHeaders:boolean):Promise<ResponseHeaders|string> {
         if (this.verbose) console.log('to evaluate', this.baseUrl, path, method, headers, body);
-        var result = await this.page.evaluate(async ({path, method, headers, body, onlyHeaders})=>{
-            console.log('to fetch', path, method, headers, body);
+        var result = await this.page.evaluate(async ({path, method, headers, body, onlyHeaders, verbose})=>{
+            if (verbose) console.log('to fetch', path, method, headers, body);
             try{
-                console.log('localStorage', localStorage?.setup?.slice?.(0,20) ?? 'NO SETUP');
                 var response = await fetch('.'+path, {method, headers, body, credentials: 'include'/* , redirect: 'manual'*/});
-                console.log('response', response.status);
+                if (verbose) console.log('response', response.status);
                 if (onlyHeaders) {
                     return {status: response.status, location: response.headers.get('location')};
                 } else {
                     var result = await response.text();
-                    console.log(result)
+                    if (verbose) console.log(result)
                     return result;
                 }
             }catch(err){
                 console.log('**** CATCHED!', err);
                 throw err;
             }
-        }, {path, method, headers, body: body.toString(), onlyHeaders});
-                console.log(result)
+        }, {path, method, headers, body: body.toString(), onlyHeaders, verbose: this.verbose});
+        if (this.verbose) console.log(result)
         return result;
     }
 
@@ -207,7 +209,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         await this.initSession();
         if (!this.page) throw new Error('Browser session not initialized');
         const loginUrl = new URL('./login', this.baseUrl).toString();
-        console.log('going to login page:', this.baseUrl, loginUrl);
+        if (this.verbose) console.log('going to login page:', this.baseUrl, loginUrl);
         await this.page.goto(loginUrl);
         await this.page.fill('input[name="username"]', credentials.username);
         await this.page.fill('input[name="password"]', credentials.password);
@@ -297,12 +299,12 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         var filter = primaryKeyValues === undefined ? {} : this.getPkFilter<T>(target.table, rowToSave, primaryKeyValues);
         var tableElement = await this.openGrid(target.table, filter)
         var insButton = await tableElement.waitForSelector('button[bp-action=INS]', {state:'visible'});
-        if (this.verbose || true) console.log('================> save record', target.table, !!insButton, (status == 'new'), rowToSave, {filter})
+        if (this.verbose) console.log('================> save record', target.table, !!insButton, (status == 'new'), rowToSave, {filter})
         const foundTableRow = async (emulator:BrowserEmulatedSession<TApp>, withPk:boolean) => {
             if (!withPk) {
                 await insButton.click();
                 var pkSelector = `:not([pk-values])`
-                if (this.verbose || true) console.log('================> clicked', !!insButton)
+                if (this.verbose) console.log('================> clicked', !!insButton)
                 if (this.verbose) console.log(rowToSave, status, primaryKeyValues)
                 var result = await tableElement.waitForSelector('> tbody > tr:not([pk-values]):not([dummy])', {state:'visible'});
                 if (this.verbose) console.log('================> inserting column pk =', await result.getAttribute('pk-values'))
