@@ -337,6 +337,22 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             return result;
         }
         var namesToEdit = Object.keys(rowToSave).filter(name => rowToSave[name] !== undefined && !(name in filter && sameValue(rowToSave[name], filter[name])));
+        var notEditableNames = [] as string[];
+        var namesAlreadySet = [] as string[];
+        for (var nameToEdit of namesToEdit) {
+            var cell = await tableRow.waitForSelector(`> [my-colname=${nameToEdit}]`, {state:'attached', timeout: TO.beLoaded});
+            if (!await this.isEditableCell(cell)) {
+                if (await this.cellHasValue(cell, rowToSave[nameToEdit], description[nameToEdit])) {
+                    namesAlreadySet.push(nameToEdit);
+                } else {
+                    notEditableNames.push(nameToEdit);
+                }
+            }
+        }
+        if (notEditableNames.length) {
+            throw new Error(`Columns ${notEditableNames.join(', ')} are not editable in grid ${target.table}`);
+        }
+        namesToEdit = namesToEdit.filter(name => !namesAlreadySet.includes(name));
         var hiddenNames = [] as string[];
         for (var nameToEdit of namesToEdit) {
             var cell = await tableRow.waitForSelector(`> [my-colname=${nameToEdit}]`, {state:'attached', timeout: TO.beLoaded});
@@ -347,14 +363,6 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
                 throw new Error(`Hidden columns ${hiddenNames.join(', ')} in grid ${target.table}. Use {unhide:true} in saveRecord`);
             }
             await this.unhideColumns(tableElement, hiddenNames);
-        }
-        var notEditableNames = [] as string[];
-        for (var nameToEdit of namesToEdit) {
-            var cell = await tableRow.waitForSelector(`> [my-colname=${nameToEdit}]`, {state:'attached', timeout: TO.beLoaded});
-            if (!await this.isEditableCell(cell)) notEditableNames.push(nameToEdit);
-        }
-        if (notEditableNames.length) {
-            throw new Error(`Columns ${notEditableNames.join(', ')} are not editable in grid ${target.table}`);
         }
         var prevInputElement:ElementHandle<HTMLLIElement> | undefined;
         for(var name in rowToSave){
@@ -435,6 +443,17 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         var contentEditable = await cell.getAttribute('contenteditable');
         var disabled = await cell.evaluate(td => 'disabled' in td && td.disabled === true);
         return contentEditable !== 'false' && !disabled;
+    }
+
+    private async cellHasValue(cell: ElementHandle<HTMLLIElement>, value: unknown, fieldDescription: Description | undefined){
+        var typed = await cell.evaluate((td): {hasTypedValue:boolean, value:unknown} =>
+            'getTypedValue' in td && typeof td.getTypedValue == 'function' ? {hasTypedValue:true, value:td.getTypedValue()} : {hasTypedValue:false, value:null}
+        );
+        if (typed.hasTypedValue && sameValue(typed.value, value)) return true;
+        var shown = await cell.textContent();
+        if (shown == null || shown === '') return value == null;
+        if (fieldDescription == null) return false;
+        return sameValue(this.valueFromVisualRepresentation(shown, fieldDescription), value);
     }
 
     private async waitFinalIoStatus(table: string, tableRow: ElementHandle<HTMLLIElement>, columnNames: string[]){

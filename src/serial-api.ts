@@ -268,6 +268,14 @@ export class EmulatedSession<TApp extends AppBackend>{
     }
     async tableDataTest<T extends Description = any>(target: {table: string, description:T} | string, rows: Row[], compare: 'all', opts?: TableDataTestOptions): Promise<void>{
         var table = typeof target == "string" ? target : target.table;
+        if (typeof target != "string") {
+            var objectDescription: Record<string, Description> = 'object' in target.description ? target.description.object : {};
+            var fixedFieldNames = this.toFixedField(opts?.fixedFields).map(pair => pair.fieldName);
+            var columnsNotInDescription = (rows.length ? Object.keys(rows[0]!) : []).filter(name => !objectDescription[name] && !fixedFieldNames.includes(name));
+            if (columnsNotInDescription.length) {
+                throw new Error(`tableDataTest: columns ${columnsNotInDescription.join(', ')} expected in rows but not in description of ${table}`);
+            }
+        }
         var {unhide: _unhide, ...optsForRequest} = opts ?? {};
         var result = await this.request({
             path:'/table_data',
