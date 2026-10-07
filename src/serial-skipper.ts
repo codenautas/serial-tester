@@ -348,6 +348,14 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             }
             await this.unhideColumns(tableElement, hiddenNames);
         }
+        var notEditableNames = [] as string[];
+        for (var nameToEdit of namesToEdit) {
+            var cell = await tableRow.waitForSelector(`> [my-colname=${nameToEdit}]`, {state:'attached', timeout: TO.beLoaded});
+            if (!await this.isEditableCell(cell)) notEditableNames.push(nameToEdit);
+        }
+        if (notEditableNames.length) {
+            throw new Error(`Columns ${notEditableNames.join(', ')} are not editable in grid ${target.table}`);
+        }
         var prevInputElement:ElementHandle<HTMLLIElement> | undefined;
         for(var name in rowToSave){
             if (!namesToEdit.includes(name)) {
@@ -362,6 +370,11 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
                     await element.focus();
                     await this.page.keyboard.press("Shift+End")
                     if (this.verbose) console.log('focus', name, await element.getAttribute('my-colname'));
+                }
+                if (await tableRow.$(`> [my-colname=${name}]:focus-within`) == null) {
+                    var focusedCell = await tableRow.$('> :focus-within');
+                    var focusedName = focusedCell == null ? '(outside the row)' : await focusedCell.getAttribute('my-colname');
+                    throw new Error(`Focus is not in column ${name} in grid ${target.table} before typing, it is in ${focusedName}`);
                 }
                 await this.page.keyboard.insertText(this.keystrokeStringOfrow(rowToSave[name]));
             }
@@ -416,6 +429,12 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         }
         if (this.verbose) console.log('-------> data2', fieldData, description);
         return fieldData;
+    }
+
+    private async isEditableCell(cell: ElementHandle<HTMLLIElement>){
+        var contentEditable = await cell.getAttribute('contenteditable');
+        var disabled = await cell.evaluate(td => 'disabled' in td && td.disabled === true);
+        return contentEditable !== 'false' && !disabled;
     }
 
     private async waitFinalIoStatus(table: string, tableRow: ElementHandle<HTMLLIElement>, columnNames: string[]){
