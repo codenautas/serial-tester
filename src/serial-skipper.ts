@@ -163,7 +163,11 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         });
         this.page = await this.context.newPage();
         this.page.on('console', msg => {
-            if (this.verbose || msg.type() == 'error' || msg.type() == 'warning') console.log(`[Browser Session] ${msg.text()}`)
+            if (msg.type() == 'error' || msg.type() == 'warning') {
+                console.log(`[Browser Session] ${msg.text()} [at: ${msg.location().url}] [page: ${this._page?.url()}]`)
+            } else if (this.verbose) {
+                console.log(`[Browser Session] ${msg.text()}`)
+            }
         });
         this.page.on('pageerror', err => console.error(`[Browser Session] ${err.message} \n ${err.stack}`));
     }
@@ -277,7 +281,21 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
                 throw err
             }
         }
-        throw new Error(`valueFromVisualRepresentation error ${representation} not a ${JSON.stringify(type)}`)
+        return undefined;
+    }
+
+    private async cellValue(element: ElementHandle<HTMLLIElement>, fieldDescription: Description): Promise<unknown>{
+        var value = this.valueFromVisualRepresentation(await element.textContent(), fieldDescription);
+        if (value !== undefined) return value;
+        var typedValueJson = await element.evaluate((td): string|null => {
+            var JSON4all = (globalThis as typeof globalThis & {JSON4all?: {stringify(value:unknown):string}}).JSON4all;
+            if (JSON4all == null || !('getTypedValue' in td) || typeof td.getTypedValue != 'function') return null;
+            return JSON4all.stringify(td.getTypedValue());
+        });
+        if (typedValueJson == null) {
+            throw new Error(`Cannot get the value of column ${await element.getAttribute('my-colname')}: the type is not known and the cell is not a typed-control`);
+        }
+        return json4all.parse<unknown>(typedValueJson);
     }
 
     async openGrid(table: string, filter:Record<string, any>){
@@ -285,9 +303,14 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         if (this.page == null) throw new Error("openGrid with no open page")
         const url = new URL(`./menu#table=${table}${filter ? `&ff=${json4all.toUrl(this.toFixedField(filter))}` : ``}`, this.baseUrl).toString();
         if (this.verbose) console.log('================> going to', url)
+        for (var previousGrid of await this.page.$$('table.my-grid')) {
+            await previousGrid.evaluate(table => {
+                if ('setAttribute' in table && typeof table.setAttribute == 'function') table.setAttribute('serial-tester-previous', 'yes');
+            });
+        }
         await this.page.goto(url);
         if (this.verbose) console.log('================> there')
-        var tableElement = await this.page.waitForSelector('table.my-grid');
+        var tableElement = await this.page.waitForSelector('table.my-grid:not([serial-tester-previous])');
         await tableElement.waitForSelector('[all-rows-displayed]', {state: 'attached'});
         return tableElement;
     }
@@ -394,9 +417,10 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         var touchedElements = await this.waitFinalIoStatus(target.table, tableRow, Object.keys(description).filter(name => name[0] != '$'));
         // a write-read-conflict is part of the UX: the user sees it, checks the value and retypes it once
         var conflicts = [] as {name:string, element:ElementHandle<HTMLLIElement>}[];
+        var ignoreMergeConflictsIn = opts?.ignoreMergeConflictsIn ?? [];
         for (var info of touchedElements) {
-            if (info["io-status"] == 'write-read-conflict' && namesToEdit.includes(info.name)) {
-                var shownValue = this.valueFromVisualRepresentation(await info.element.textContent(), description[info.name]!);
+            if (info["io-status"] == 'write-read-conflict' && namesToEdit.includes(info.name) && !ignoreMergeConflictsIn.includes(info.name)) {
+                var shownValue = await this.cellValue(info.element, description[info.name]!);
                 if (!sameValue(shownValue, rowToSave[info.name])) conflicts.push(info);
             }
         }
@@ -412,7 +436,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             }
             var retouchedElements = await this.waitFinalIoStatus(target.table, tableRow, conflicts.map(conflict => conflict.name));
             for (var retouched of retouchedElements) {
-                var retypedValue = this.valueFromVisualRepresentation(await retouched.element.textContent(), description[retouched.name]!);
+                var retypedValue = await this.cellValue(retouched.element, description[retouched.name]!);
                 if (retouched["io-status"] == 'write-read-conflict' || !sameValue(retypedValue, rowToSave[retouched.name])) {
                     throw new Error(`Error in navigator saving record in table ${target.table}: write-read-conflict in ${retouched.name} persists after retyping. Expected ${json4all.stringify(rowToSave[retouched.name])}, shown ${json4all.stringify(retypedValue)}, io-status ${retouched["io-status"]}`);
                 }
@@ -508,7 +532,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         if (this.verbose) console.log('================> veo', description)
         var touched = await Promise.all(
                 pairsNameElement.map(
-                    async ({name, element}) => [name, this.valueFromVisualRepresentation(await element.textContent(), description[name]!)]
+                    async ({name, element}) => [name, await this.cellValue(element, description[name]!)]
                 )
             )
         if (this.verbose) console.log('================> acá', touched)
@@ -559,26 +583,25 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         if (this.verbose) console.log('############>', target.table);
         var tableElement = await this.openGrid(target.table, opts?.fixedFields ?? {});
         if (this.verbose) console.log('############>', !!tableElement);
-        if (opts?.fixedFields && !(opts?.fixedFields instanceof Array) && opts?.fixedFields instanceof Object) {
-            var ff = opts?.fixedFields;
-            rows = rows.map(row => {
-                for (const name in opts?.fixedFields) {
-                    var ffv = ff[name];
-                    if (row[name]?.isRealDate && typeof ffv == "string") {
-                        ffv = date.iso(ffv);
-                    }
-                    if (!(name in row) || ffv instanceof Array) {
-                        // ok!
-                    } else if (sameValue(row[name], ffv)) {
-                        delete row[name];
-                    } else {
-                        console.log(`Error in fixedFields in tableDataTest doesn't match the rows`, row[name], ff[name]);
-                        throw new Error(`Error in fixedFields in tableDataTest doesn't match the rows in ${name} field`)
-                    };
+        var fixedFieldPairs = this.toFixedField(opts?.fixedFields);
+        rows = rows.map(row => {
+            for (const pair of fixedFieldPairs) {
+                var name = pair.fieldName;
+                var ffv = pair.value;
+                if (row[name]?.isRealDate && typeof ffv == "string") {
+                    ffv = date.iso(ffv);
                 }
-                return row;
-            });
-        }
+                if (!(name in row) || pair.until !== undefined) {
+                    // ok!
+                } else if (sameValue(row[name], ffv)) {
+                    delete row[name];
+                } else {
+                    console.log(`Error in fixedFields in tableDataTest doesn't match the rows`, row[name], pair.value);
+                    throw new Error(`Error in fixedFields in tableDataTest doesn't match the rows in ${name} field`)
+                };
+            }
+            return row;
+        });
         var objectDescription: Record<string, Description> = 'object' in target.description ? target.description.object : {};
         var columnNames = (rows.length ? Object.keys(rows[0]!) : [])
         var columnsNotInDescription = columnNames.filter(name => !objectDescription[name]);
@@ -589,11 +612,9 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
             await this.unhideColumns(tableElement, columnNames);
         }
         var response = await this.getAllVisibleRowsFromGrid(target, tableElement, columnNames);
-        if (opts?.fixedFields && !(opts?.fixedFields instanceof Array) && opts?.fixedFields instanceof Object) {
-            for (const row of response) {
-                for (const name in opts?.fixedFields) {
-                    if (row[name] == null) row[name] = opts?.fixedFields[name];
-                }
+        for (const row of response) {
+            for (const pair of fixedFieldPairs) {
+                if (pair.until === undefined && row[pair.fieldName] == null) row[pair.fieldName] = pair.value;
             }
         }
         if (this.verbose) console.log('############>', response);

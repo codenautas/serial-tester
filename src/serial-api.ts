@@ -86,7 +86,7 @@ export type Credentials = {username:string, password:string}
 export type FixedFields = {fieldName:string, value:any, until?:AnyValue}[]
 export type EasyFixedFields = null|undefined|FixedFields|Record<string,AnyValue|[AnyValue, AnyValue]>
 
-export type SaveRecordOptions = {unhide?: boolean}
+export type SaveRecordOptions = {unhide?: boolean, ignoreMergeConflictsIn?: string[]}
 export type TableDataTestOptions = {fixedFields?: EasyFixedFields, unhide?: boolean}
 
 export type Methods = 'get'|'post'|'put'|'patch'|'delete'|'head'
