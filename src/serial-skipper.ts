@@ -272,7 +272,8 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         if ('optional' in type) return this.valueFromVisualRepresentation(representation, type.optional);
         if ('string' in type) return representation;
         if ('boolean' in type) return this.booleanRepresentation[representation];
-        if ('number' in type) return parseFloat(representation);
+        // the number representation depends on the locale (decimal and thousands separators), the typed-control knows it
+        if ('number' in type) return undefined;
         if ('class' in type && type.class == Date) {
             try{
                 var parts = representation.split('/').map(n=>parseFloat(n)) as unknown as [number,1|2|3|4|5|6|7|8|9|10|11|12,number];
