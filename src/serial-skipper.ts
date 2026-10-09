@@ -19,7 +19,8 @@ export const TO = {
     beLoaded: 1000,
     loggedIn: 5000,
     noWaitMustBeThere:100,
-    beforeRetype: 1000
+    beforeRetype: 1000,
+    afterRetype: 5000
 }
 
 export interface BrowserConfig {
@@ -432,7 +433,12 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
                 await this.page.keyboard.press("Shift+End")
                 await this.page.keyboard.insertText(this.keystrokeStringOfrow(rowToSave[conflict.name]));
                 await this.page.keyboard.press("Tab")
-                await tableRow.waitForSelector(`> [my-colname=${conflict.name}]:not([io-status=write-read-conflict])`, {state:'attached'});
+                try {
+                    await tableRow.waitForSelector(`> [my-colname=${conflict.name}]:not([io-status=write-read-conflict])`, {state:'attached', timeout: TO.afterRetype});
+                } catch (err) {
+                    if (expected(err).name != 'TimeoutError') throw err;
+                    throw new Error(`Error in navigator saving record in table ${target.table}: write-read-conflict in ${conflict.name} does not change after retyping. Expected ${json4all.stringify(rowToSave[conflict.name])}, shown "${await conflict.element.textContent()}", title "${await conflict.element.getAttribute('title')}"`, {cause: err});
+                }
             }
             var retouchedElements = await this.waitFinalIoStatus(target.table, tableRow, conflicts.map(conflict => conflict.name));
             for (var retouched of retouchedElements) {
