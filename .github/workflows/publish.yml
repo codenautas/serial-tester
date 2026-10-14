@@ -13,7 +13,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     outputs:
-      status: ${{ steps.success.outputs.ok }}    
+      status: ${{ steps.success.outputs.ok }}
     steps:
       - uses: actions/checkout@v4
       - name: Get package.json version

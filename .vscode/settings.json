@@ -1,4 +1,8 @@
 {
     "window.title": "😛 ${dirty}${rootName}${separator}${activeEditorMedium}",
-    "typescript.tsdk": "node_modules\\typescript\\lib"
+    "typescript.tsdk": "node_modules\\typescript\\lib",
+    "editor.renderWhitespace": "selection",
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "files.encoding": "utf8"
 }

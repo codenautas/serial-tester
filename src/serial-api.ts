@@ -58,7 +58,7 @@ export async function startServer<T extends AppBackend>(AppConstructor: AppBacke
 }
 
 export async function startContext<T extends AppBackend>(
-    AppConstructor: AppBackendConstructor<T>, 
+    AppConstructor: AppBackendConstructor<T>,
     getInternals: () => Promise<{
         sessionFactory: (backend:T, port:number) => EmulatedSession<T>
     }>
@@ -155,7 +155,7 @@ export class EmulatedSession<TApp extends AppBackend>{
         }
     }
     async callProcedure<T extends Description, U extends Description>(
-        target:{procedure:string, parameters:T, result:U}, 
+        target:{procedure:string, parameters:T, result:U},
         params:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>
     ):Promise<DefinedType<NoInfer<U>>>{
         var mandatoryParameters = 'object' in target.parameters ? target.parameters.object : {};
@@ -183,7 +183,7 @@ export class EmulatedSession<TApp extends AppBackend>{
                     var obj = JSON4all.parse( line || '{}' ) as {error:{message:string, code:string}};
                 }catch(err){
                     console.log('Json error:',line)
-                    throw err; 
+                    throw err;
                 }
                 if (obj.error) {
                     const error = expected(new Error("Backend error: " + obj.error.message));
@@ -297,7 +297,7 @@ export class EmulatedSession<TApp extends AppBackend>{
             var filteredReponseRows = obtained;
         }
         switch(compare){
-            case 'all': 
+            case 'all':
                 try{
                     discrepances.showAndThrow(filteredReponseRows, expected);
                 } catch (err) {
@@ -333,7 +333,7 @@ export function expectError(action: ()=>void|Promise<void>, check: string): void
             throw err;
         }
     }
-    try { 
+    try {
         var result = action();
         if (result instanceof Promise) {
             return result.then(itDidntFail).catch(checkExpected)

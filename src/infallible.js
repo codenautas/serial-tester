@@ -1,3 +1,5 @@
+"use strict";
+
 const { chromium } = require('playwright');
 const readline = require('readline');
 

@@ -157,9 +157,9 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         this.context = await this.browser.newContext({
             viewport: this.sessionConfig.viewport,
             userAgent: this.sessionConfig.userAgent,
-            recordVideo: this.sessionConfig.recordVideo ? { 
+            recordVideo: this.sessionConfig.recordVideo ? {
                 dir: './test-videos/',
-                size: this.sessionConfig.viewport 
+                size: this.sessionConfig.viewport
             } : undefined
         });
         this.page = await this.context.newPage();
@@ -240,7 +240,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         this.config = setup;
         return null;
     }
-    
+
     keystrokeStringOfrow<T extends string|boolean|number|Date|RealDate>(value: T){
         if (value == null) return '';
         switch (typeof value) {
@@ -632,10 +632,10 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
     // Utilidades específicas del browser
     async takeScreenshot(name?: string): Promise<string> {
         if (!this.page) throw new Error('Browser session not initialized');
-        
+
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const filename = `${this.sessionConfig.screenshotsPath}${name || 'screenshot'}-${timestamp}.png`;
-        
+
         await this.page.screenshot({ path: filename, fullPage: true });
         return filename;
     }
@@ -666,7 +666,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
 
     async submitForm(selector: string): Promise<void> {
         if (!this.page) throw new Error('Browser session not initialized');
-        
+
         await Promise.all([
             this.page.waitForNavigation(),
             this.page.click(`${selector} button[type="submit"], ${selector} input[type="submit"]`)
