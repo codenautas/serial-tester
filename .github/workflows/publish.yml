@@ -1,62 +1,26 @@
-name: NPM publish
+name: Publish
 
 on:
   push:
     tags:
       - 'v[0-9]+.[0-9]*'
+  workflow_dispatch:
+    inputs:
+      publish_without_testing:
+        description: 'Publicar sin correr los tests'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
-  id-token: write  # Required for OIDC
-  contents: read
+  id-token: write
+  contents: write
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    outputs:
-      status: ${{ steps.success.outputs.ok }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Get package.json version
-        id: get_package_version
-        run: echo "version=$(jq -r '.version' package.json)" >> "$GITHUB_OUTPUT"
-      - name: Check versions from tag and package.json
-        if: github.ref != format('refs/tags/v{0}', steps.get_package_version.outputs.version)
-        run: |
-          echo "Error: Versions does not match. Tag: (${{ github.ref }}),  package.json: (v${{ steps.get_package_version.outputs.version }})"
-          exit 1
-      - name: Set the result
-        if: github.ref == format('refs/tags/v{0}', steps.get_package_version.outputs.version)
-        id: success
-        run: |
-          echo "Good: Versions match. (${{ github.ref }})"
-          echo "ok=ok" >> "$GITHUB_OUTPUT"
   publish:
-    runs-on: ubuntu-latest
-    needs: check
-    if: needs.check.outputs.status == 'ok'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
-      - run: npm ci
-      - run: npm test
-      - run: |
-          VERSION=$(node -p "require('./package.json').version")
-          case $VERSION in
-            *beta*)
-              TAG="--tag beta"
-              ;;
-            *alpha*)
-              TAG="--tag alpha"
-              ;;
-            *rc*)
-              TAG="--tag rc"
-              ;;
-            *)
-              TAG=""
-              ;;
-          esac
-          echo "Publishing version $VERSION with tag: $TAG"
-          npm publish $TAG
+    uses: codenautas/.github/.github/workflows/npm-publish-new-version.yaml@v3
+    with:
+      node_version: '24.x'
+      publish_without_testing: ${{ inputs.publish_without_testing == true }}
+      postgres: ''
+      create-tag: ${{ github.event_name == 'workflow_dispatch' }}

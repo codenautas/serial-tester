@@ -111,7 +111,7 @@ export async function startBrowser(browserConfig?: BrowserConfig): Promise<Brows
         ...browserConfig
     };
     const manager = new BrowserManager(config);
-    return await manager.start();
+    return manager.start();
 }
 
 export async function startNavigatorContext<T extends AppBackend>(AppConstructor: AppBackendConstructor<T>, browserConfig?: BrowserConfig):Promise<Contexts<T>>{
@@ -224,7 +224,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         const expectedPath = this.server.config.login.plus.successRedirect;
         if (!currentUrl.includes(expectedPath)) {
             if (opts.returnErrorMessage) {
-                const errorElement = await this.page.locator('.error-message').first();
+                const errorElement = this.page.locator('.error-message').first();
                 return await errorElement.textContent() || 'Login failed';
             }
             throw new Error(`Login failed. Current URL: ${currentUrl}`);
@@ -319,7 +319,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
 
     override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new', primaryKeyValues?:undefined, opts?:SaveRecordOptions):Promise<DefinedType<T>>
     override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<Partial<DefinedType<NoInfer<T>>>>, status:'update', primaryKeyValues?:any[]|null, opts?:SaveRecordOptions):Promise<DefinedType<T>>
-    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]|null, opts?:SaveRecordOptions):Promise<DefinedType<T>>{
+    override async saveRecord<T extends Description>(target: {table: string, description:T}, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, status:'new'|'update', primaryKeyValues?:any[]|null, opts?:SaveRecordOptions):Promise<DefinedType<T>>{ // eslint-disable-line complexity, max-statements
         var description: Record<string, Description> = (target.description as RowDescription).object!;
         var filter = primaryKeyValues === undefined ? {} : this.getPkFilter<T>(target.table, rowToSave, primaryKeyValues);
         var tableElement = await this.openGrid(target.table, filter)
@@ -333,7 +333,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
                 if (this.verbose) console.log(rowToSave, status, primaryKeyValues)
                 var result = await tableElement.waitForSelector('> tbody > tr:not([pk-values]):not([dummy])', {state:'visible'});
                 if (this.verbose) console.log('================> inserting column pk =', await result.getAttribute('pk-values'))
-                if (this.verbose) await Promise.all([result].map(handler => emulator.explain(handler)));
+                if (this.verbose) await Promise.all([result].map(handler => emulator.explain(handler))); // eslint-disable-line @typescript-eslint/promise-function-async
             } else {
                 var JsonPk = emulator.getJsonPkValues<T>(target.table, rowToSave, primaryKeyValues);
                 var pkSelector = `[pk-values=${escapeCss(JsonPk)}]`
@@ -447,7 +447,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
                 if (retouched["io-status"] == 'write-read-conflict' || !sameValue(retypedValue, rowToSave[retouched.name])) {
                     throw new Error(`Error in navigator saving record in table ${target.table}: write-read-conflict in ${retouched.name} persists after retyping. Expected ${json4all.stringify(rowToSave[retouched.name])}, shown ${json4all.stringify(retypedValue)}, io-status ${retouched["io-status"]}`);
                 }
-                touchedElements = touchedElements.map(info => info.name == retouched.name ? retouched : info);
+                touchedElements = touchedElements.map(info => info.name == retouched.name ? retouched : info); // eslint-disable-line no-loop-func
             }
         }
         if (touchedElements.some(info => info["io-status"] == "error")) {
@@ -585,7 +585,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
         }));
     }
 
-    override async tableDataTest<T extends Description>(target: {table: string, description:T} | string, rows: Row[], compare: 'all', opts?: TableDataTestOptions): Promise<void> {
+    override async tableDataTest<T extends Description>(target: {table: string, description:T} | string, rows: Row[], compare: 'all', opts?: TableDataTestOptions): Promise<void> { // eslint-disable-line complexity
         if (typeof target == "string") throw new Error("must use {table, description} in tableDataTest for Navigators")
         if (this.verbose) console.log('############>', target.table);
         var tableElement = await this.openGrid(target.table, opts?.fixedFields ?? {});
@@ -605,7 +605,7 @@ export class BrowserEmulatedSession<TApp extends AppBackend> extends EmulatedSes
                 } else {
                     console.log(`Error in fixedFields in tableDataTest doesn't match the rows`, row[name], pair.value);
                     throw new Error(`Error in fixedFields in tableDataTest doesn't match the rows in ${name} field`)
-                };
+                }
             }
             return row;
         });

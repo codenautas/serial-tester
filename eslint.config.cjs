@@ -1,5 +1,7 @@
 "use strict";
 
+const tseslint = require("typescript-eslint");
+
 module.exports = [
     {
         ignores: ["dist/**"]
@@ -48,7 +50,7 @@ module.exports = [
             "default-case": 0,
             "dot-location": 0,
             "dot-notation": 0,
-            "eqeqeq": ["error", "always", { "null": "ignore" }],
+            "eqeqeq": ["warn", "always", { "null": "ignore" }],
             "guard-for-in": 0, // poluting prototype is a old thing
             "no-alert": 2,
             "no-caller": 2,
@@ -202,6 +204,36 @@ module.exports = [
             "prefer-spread": 0,
             "prefer-template": 0,
             "require-yield": 0
+        }
+    },
+    {
+        files: ["**/*.ts", "**/*.mts", "**/*.cts"],
+        languageOptions: {
+            parser: tseslint.parser,
+            parserOptions: {
+                projectService: true,
+                tsconfigRootDir: __dirname
+            },
+            sourceType: "module"
+        },
+        plugins: {
+            "@typescript-eslint": tseslint.plugin
+        },
+        rules: {
+            // JavaScript rules with false positives in TypeScript
+            "no-redeclare": 0,
+            "no-unused-expressions": 0,
+            "strict": 0,
+            "@typescript-eslint/no-unused-expressions": 2,
+
+            // Types and promises
+            "@typescript-eslint/no-explicit-any": 1,
+            "@typescript-eslint/no-floating-promises": 2,
+            "@typescript-eslint/promise-function-async": 2,
+            "@typescript-eslint/await-thenable": 2,
+            "@typescript-eslint/require-await": 2,
+            "@typescript-eslint/return-await": 2,
+            "@typescript-eslint/no-misused-promises": 2
         }
     }
 ];

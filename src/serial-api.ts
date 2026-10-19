@@ -46,10 +46,10 @@ export async function startServer<T extends AppBackend>(AppConstructor: AppBacke
     } else if (config.test?.["only-in-db"] != config.db.database) {
         console.error('************************ WARNING ************************')
         console.error(`"${config.db.database}" no es la base de datos de test.only-in-db = ${config.test?.["only-in-db"]}`);
-        process.exit(0);
+        process.exit(0);  // eslint-disable-line no-process-exit -- Must stop if it isn't the right db
     }
     try {
-        fs.unlink('local-log-all.sql')
+        await fs.unlink('local-log-all.sql')
     } catch (err) {
         if (expected(err).code != 'ENOENT') throw err;
     }
@@ -75,7 +75,7 @@ export async function startContext<T extends AppBackend>(
 }
 
 export async function startBackendAPIContext<T extends AppBackend>(AppConstructor: AppBackendConstructor<T>):Promise<Contexts<T>>{
-    return startContext(AppConstructor, async () => ({sessionFactory:(backend: T, port:number) => new EmulatedSession(backend, port)}));
+    return startContext(AppConstructor, async () => ({sessionFactory:(backend: T, port:number) => new EmulatedSession(backend, port)}));  // eslint-disable-line @typescript-eslint/require-await -- await is needed for the Interface
 }
 
 export type AnyValue = string|number|Date|boolean|null
@@ -127,7 +127,7 @@ export class EmulatedSession<TApp extends AppBackend>{
         if (onlyHeaders) {
             return {status: response.status, location: response.headers.get('location')};
         } else {
-            return await response.text()
+            return response.text()
         }
     }
     protected async request(params:{path:string, payload:any, onlyHeaders:true}):Promise<ResponseHeaders>;
@@ -169,7 +169,7 @@ export class EmulatedSession<TApp extends AppBackend>{
         })
         return guarantee(target.result, result);
     }
-    protected async getResult(result:string, parseResult?:ResultAs){
+    protected async getResult(result:string, parseResult?:ResultAs){ // eslint-disable-line @typescript-eslint/require-await -- await is needed for the Interface
         switch (parseResult) {
         case 'text':
             return result;
@@ -222,7 +222,7 @@ export class EmulatedSession<TApp extends AppBackend>{
             return null;
         }
     }
-    async closeSession(): Promise<void> {
+    async closeSession(): Promise<void> { // eslint-disable-line @typescript-eslint/require-await -- await is needed for the Interface
         this.config = null!;
     }
     getJsonPkValues<T extends Description>(table: string, rowToSave:PartialOnUndefinedDeep<DefinedType<NoInfer<T>>>, primaryKeyValues:undefined|null|any[]): string {
